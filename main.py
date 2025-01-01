@@ -1,11 +1,12 @@
+from tqdm import tqdm
+import time
 import tiktoken
 import asyncio
-from typing import Generator, Literal, Optional, List
 from dataclasses import dataclass, field
 import datetime
 import shutil
 import textwrap
-from typing import Generator, Literal, Optional, List
+from typing import Any, Callable, Generator, Literal, Optional
 from openai import AsyncOpenAI, OpenAI, NOT_GIVEN
 from dotenv import load_dotenv
 import os
@@ -13,17 +14,12 @@ from tree_sitter import Node, Language, Parser
 from tree_sitter_languages import get_language, get_parser
 import re
 import warnings
+from llms import model_to_provider, provider_to_api_key, provider_to_base_url
+from pydantic import BaseModel
 
 ##########################
 ## LLM SETUP
 ##########################
-
-load_dotenv()
-
-api_key = os.getenv("OPENROUTER_API_KEY")
-
-openai = OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
-aopenai = AsyncOpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
 
 openrouter_headers = {
     "HTTP-Referer": "https://github.com/HigherOrderCO/HVM",
@@ -82,7 +78,7 @@ def format_msgs(
                     output += textwrap.indent(block, prefix=indent * " ")
                     continue
                 elif highlight:
-                    lang = block.split("\n")[0]
+                    # lang = block.split("\n")[0]
                     # block = rich_to_str(Syntax(block.rstrip(), lang))
                     block = block.rstrip()
                 output += f"```{block.rstrip()}\n```"
@@ -113,29 +109,10 @@ def _prep_o1(msgs: list[Message]) -> Generator[Message, None, None]:
 def msgs2dicts(msgs: list[Message]) -> list[dict]:
     return [msg.to_dict() for msg in msgs]
 
-def chat(messages: list[Message], model: str) -> str:
-    is_o1 = model.startswith("o1")
-    if is_o1:
-        messages = list(_prep_o1(messages))
-
-    messages_dicts = msgs2dicts(messages)
-
-    response = openai.chat.completions.create(
-        model=model,
-        messages=messages_dicts,
-        temperature=TEMPERATURE if not is_o1 else NOT_GIVEN,
-        top_p=TOP_P if not is_o1 else NOT_GIVEN,
-        tools=NOT_GIVEN,
-        extra_headers=(
-            openrouter_headers if "openrouter.ai" in str(openai.base_url) else {}
-        ),
-    )
-    content = response.choices[0].message.content
-    assert content
-    return content
-
 async def achat(messages: list[Message], model: str, timeout: float = 40.0) -> str:
     """Async version of chat()"""
+    provider = model_to_provider[model]
+    aopenai = AsyncOpenAI(api_key=provider_to_api_key[provider], base_url=provider_to_base_url[provider])
     async def _chat(messages: list[Message]):
         is_o1 = model.startswith("o1")
         if is_o1:
@@ -163,8 +140,6 @@ async def achat(messages: list[Message], model: str, timeout: float = 40.0) -> s
         print(f"Chat completion timed out after {timeout} seconds")
         return ""
 
-deepseek = 'deepseek/deepseek-chat'
-
 ##########################
 ## TREE SITTER
 ##########################
@@ -172,12 +147,13 @@ deepseek = 'deepseek/deepseek-chat'
 def setup_tree_sitter(file: str):
     ext = file.split('.')[1]
     if ext == "hs": # outdated in tree-sitter-languages
-        Language.build_library(
-            'build/haskell.so',
-            [
-                './tree-sitter-haskell'
-            ]
-        )
+        if not os.path.exists('build/haskell.so'):
+            Language.build_library(
+                'build/haskell.so',
+                [
+                    './tree-sitter-haskell'
+                ]
+            )
         HASKELL_LANGUAGE = Language('build/haskell.so', 'haskell')
         parser = Parser()
         parser.set_language(HASKELL_LANGUAGE)
@@ -207,6 +183,8 @@ def camel_to_snake(camel_str):
         else:
             result.append(char)
     return ''.join(result)
+
+def node_size(node: Optional[Node]): return (node.end_point[0] - node.start_point[0]) if node else float("-inf")
     
 class EmptyNode:
     start_point: tuple[int, int]
@@ -218,6 +196,9 @@ class EmptyNode:
         self.start_point = start_point
         self.end_point = end_point
 
+# should get reset between LLM calls in case of changes to the codebase
+_parse_cache = {}
+
 class FileContext:
     """Tree of context for a single source code file. Show nodes using the `show` methods."""
     def __init__(self, file: str | None = None, content: str | None = None):
@@ -227,32 +208,44 @@ class FileContext:
             with open(file, 'r') as f: self.code = f.read()
         self.lines = self.code.splitlines()
         self.parser, self.language = setup_tree_sitter(file)
-        self.tree = self.parser.parse(bytes(self.code, "utf8"))
+        self.tree = _parse_cache[file]["tree"] if file in _parse_cache else self.parser.parse(bytes(self.code, "utf8"))
         self.root_node = self.tree.root_node
         self.show_indices = set()
-        self.nodes = [[] for _ in range(len(self.lines) + 1)]
-        self.scopes = [set() for _ in range(len(self.lines) + 1)]
-        self.walk_tree(self.root_node)
+        self.nodes = _parse_cache[file]["nodes"] if file in _parse_cache else [[] for _ in range(len(self.lines) + 1)]
+        self.scopes = _parse_cache[file]["scopes"] if file in _parse_cache else [set() for _ in range(len(self.lines) + 1)]
+        if not file in _parse_cache: self.walk_tree(self.root_node)
+        _parse_cache[file] = {"tree": self.tree, "nodes": self.nodes, "scopes": self.scopes}
 
-    def show_scopes_mentioning(
+    def shallow_copy(self):
+        return FileContext(file=self.file, tree=self.tree)
+
+    def show_lines_mentioning(
         self,
         name: str,
         scope: Literal["full", "line", "partial"] = "line",
-        parents: Literal["none", "all"] = "none"
+        parents: Literal["none", "all"] = "none",
+        padding: int = 0
     ):
         line_matches = []
         for i, line in enumerate(self.lines):
             if name in line or camel_to_snake(name) in line or snake_to_camel(name) in line:
+                # some extra context
+                self.show(lines=list(range(max(0, i + 1 - padding), min(len(self.lines), i + padding + 2))), scope="line", last_line=False, parents=parents)
                 line_matches.append(i + 1)
-                if scope != "full": continue
-                signature_node: Optional[Node] = next((n for n in self.nodes[i] if n.type == "signature"), None)
-                if signature_node:
-                    try:
-                        fn_name = signature_node.named_child(0).text.decode("utf-8")
-                        self.show(query=self.definition_query(fn_name, include_body=True), scope="full", last_line=False, parents=parents)
-                    except: pass
         self.show(lines=line_matches, scope=scope, last_line=False, parents=parents)
         return self
+    
+    def types_query(self):
+        if self.language.name == "haskell":
+            return "(data_type name: (name) @type.definition) @type.body"
+        elif self.language.name == "c":
+            return"""
+(type_definition declarator: (type_identifier) @name) @definition.type
+(declaration type: (union_specifier name: (type_identifier) @name)) @definition.class
+(struct_specifier name: (type_identifier) @name body:(_)) @definition.class
+(enum_specifier name: (type_identifier) @name) @definition.type
+"""
+        else: raise ValueError(f"Unsupported language: {self.language.name}")
 
     def definition_query(self, name: Optional[str] = None, include_body: bool = False):
         query_hs = f"""
@@ -273,19 +266,10 @@ class FileContext:
 
     def is_definition(self, node: Node):
         if self.language.name == "haskell":
-            return node.type in ["function", "signature", "bind", "data_type", "variable"]
+            return node.type in ["function", "bind", "data_type"]
         elif self.language.name == "c":
-            return node.type in ["function_definition", "declaration","struct_specifier", "enum_specifier"]
+            return node.type in ["function_definition", "declaration", "struct_specifier", "enum_specifier"]
         else: raise ValueError(f"Unsupported language: {self.language.name}")
-
-    def show_nearest_definition(self, line: int):
-        node = self.node_for_line(line, definition=True)
-        if self.is_definition(node) or node.type == "empty": return node
-        parent = node.parent
-        while parent and not self.is_definition(parent): parent = parent.parent
-        x = parent or node
-        self.show_indices.update(range(x.start_point[0], x.end_point[0] + 1))
-        return self
 
     def find_all_children(self, node):
         children = [node]
@@ -295,9 +279,8 @@ class FileContext:
     def node_for_line(self, line: int, definition: bool = False):
         if not self.lines[line - 1].strip(): return EmptyNode((line - 1, 0), (line - 1, 0))
         largest = None
-        def size(node: Optional[Node]): return (node.end_point[0] - node.start_point[0]) if node else float("-inf")
         for node in self.nodes[line - 1]:
-            if (size(node) > size(largest)) and (not definition or self.is_definition(node)):
+            if (node_size(node) > node_size(largest)) and (not definition or self.is_definition(node)):
                 largest = node
         ret = largest or EmptyNode((line - 1, 0), (line - 1, 0))
         return ret
@@ -371,7 +354,8 @@ class FileContext:
         self.show(line_range=(0, -1), scope="line", parents="none")
         return self
     
-    def show_skeleton(self):
+    def show_skeleton(self, full_types: bool = False):
+        if full_types: self.show(query=self.types_query(), scope="full", parents="none")
         self.show(query=self.definition_query(), scope="line", parents="none")
         return self
     
@@ -419,35 +403,53 @@ class FileContext:
 def get_all_names():
     """Get all useful code symbol names across the codebase."""
     ctx = FileContext("hvm-code.c")
-    nodes = ctx.query(ctx.definition_query(include_body=False))
+    c_nodes = ctx.query(ctx.definition_query(include_body=False))
 
-    c_names = set([node.text.decode("utf-8") for node in nodes if node.type == "identifier" or node.type == "type_identifier"])
+    c_names = set([node.text.decode("utf-8") for node in c_nodes if node.type == "identifier" or node.type == "type_identifier"])
     print(f"c file found {len(c_names)} names")
 
     ctx = FileContext("hvm-code.hs")
-    nodes = ctx.query(ctx.definition_query())
-    hs_names = set([node.text.decode("utf-8") for node in nodes])
+    hs_nodes = ctx.query(ctx.definition_query())
+    hs_names = set([node.text.decode("utf-8") for node in hs_nodes])
     print(f"hs file found {len(hs_names)} names")
 
     all_names = c_names.union(hs_names)
     print(f"all files found {len(all_names)} names")
     ret = sorted(all_names)
     print(ret)
-    return ret
+    return ret, hs_nodes, c_nodes
 
-def create_contexts_for_name(name: str):
+def create_contexts_for_name(name: str, hs_nodes: list[Node], c_nodes: list[Node]):
     """To create context for a particular name, we simply show every line that mentions the name.
     We also include variations of the name - camel case, snake case, etc.
     We also include nearby block numbers.
     """
     hs_ctx = FileContext("hvm-code.hs")
     c_ctx = FileContext("hvm-code.c")
-    hs_ctx.show_scopes_mentioning(name)
-    c_ctx.show_scopes_mentioning(name)
-    # also include block numbers
+
+    # show the main definition
+    # avoiding re-querying through tree-sitter because it's slow if you do it 200+ times
+    name_query = "|".join([f"^{name}$", f"^{camel_to_snake(name)}$", f"^{snake_to_camel(name)}$"])
+    hs_nodes_for_name = [n.start_point[0] for n in hs_nodes if re.match(name_query, n.text.decode("utf-8"))]
+    c_nodes_for_name = [n.start_point[0] for n in c_nodes if re.match(name_query, n.text.decode("utf-8"))]
+    hs_ctx.show(lines=hs_nodes_for_name, scope="full", parents="all", last_line=False)
+    c_ctx.show(lines=c_nodes_for_name, scope="full", parents="all", last_line=False)
+
+    # show all lines mentioning the name, including some context
+    hs_ctx.show_lines_mentioning(name, scope="line")
+    c_ctx.show_lines_mentioning(name, scope="line")
+
+    # include block numbers
     hs_ctx.show_nearby_block_nums()
     c_ctx.show_nearby_block_nums()
     return hs_ctx, c_ctx
+
+def codebase_skeleton():
+    hs_ctx = FileContext("hvm-code.hs")
+    c_ctx = FileContext("hvm-code.c")
+    hs_ctx.show_skeleton(full_types=True)
+    c_ctx.show_skeleton(full_types=True)
+    return format_contexts(hs_ctx, c_ctx)
 
 # use these functions to inspect the tree created by tree-sitter
 # useful for debugging and understanding why queries are not working
@@ -481,24 +483,95 @@ def inspect_code(code: str, lang: Literal[".hs", ".c"]):
     print("Full Parse Tree:")
     print_tree(tree.root_node, source_code=code)
 
+def num_mentions(name: str):
+    with open("hvm-code.hs", "r") as f:
+        hs_code = f.read()
+    with open("hvm-code.c", "r") as f:
+        c_code = f.read()
+    return hs_code.count(name) + c_code.count(name) + hs_code.count(camel_to_snake(name)) + hs_code.count(snake_to_camel(name)) + c_code.count(camel_to_snake(name)) + c_code.count(snake_to_camel(name))
+
 ##########################
 ## PROMPTS
 ##########################
 
-example_query1 = "make CTRs store only the CID in the Lab field, and move the arity to a global static object in C"
-example_query2 = "replace the 'λx body' syntax by '\\x body'"
-example_query3 = ""
+example_queries = [
+    "make CTRs store only the CID in the Lab field, and move the arity to a global static object in C",
+    "replace the Lab field on Ctr nodes to store just the CID, and move the arity to a C struct stored on the Runtime State",
+    "extend the size of the addr field on runtime nodes from 32 to 40 bits, and reduce the label field from 24 to 16 bits",
+    "completely remove native numbers as a feature",
+    "remove the list/string pretty printers",
+    "measure interactions by interaction type instead of just storing the total count. report results segmented by interaction type",
+    "implement a very simple #import file.hvml feature. an import will just load and inline a different file into the current file.",
+    "implement a feature that prevents the user from creating two constructors with the same name. show a helpful error when that happens.",
+    "clean up every commented-out line of code (\"garbage collect\" the codebase)",
+    "add Tup and Get constructors. Tup behaves similarly to a superposition of label 0, and is represented as (a,b). Get behaves similarly to a duplication with label 0, and is represented as ! (a,b) = x",
+    "extend Lam and App nodes to also store a label, just like Sups and Dups. the App-Lam rule must be updated so that, when the labels are different, the nodes will commute instead of beta-reducing",
+    "replace the 'λx body' syntax by '\\x body'",
+]
 
 codebase_summary = """
-Higher-order Virtual Machine 2 (HVM2) is a massively parallel Interaction Combinator evaluator.
-By compiling programs from high-level languages (such as Python and Haskell) to HVM, one can run these languages directly on massively parallel hardware, like GPUs, with near-ideal speedup.
-HVM2 is the successor to HVM1, a 2022 prototype of this concept. Compared to its predecessor, HVM2 is simpler, faster and, most importantly, more correct. HOC provides long-term support for all features listed on its PAPER.
-This repository provides a low-level IR language for specifying the HVM2 nets and a compiler from that language to C and CUDA. It is not meant for direct human usage. If you're looking for a high-level language to interface with HVM2, check Bend instead.
+The HVM3 codebase is a highly parallel, functional runtime system designed to execute programs efficiently on massively parallel hardware. It is built around the Interaction Combinator model, which enables parallel evaluation of terms through a graph-based computational model. The codebase is divided into two main parts: the Haskell frontend (`hvm.hs`) and the C backend (`hvm.c`). The Haskell code handles high-level operations like parsing, compilation, and term manipulation, while the C code provides low-level runtime support for memory management, term reduction, and parallel execution.
+The core of the system revolves around the `Term` data type, which represents nodes in the computational graph. Each `Term` encodes a tag, label, and location, allowing the runtime to efficiently manage and process terms. The `reduce` function is the backbone of the evaluation mechanism, applying reduction rules based on the term's type. The system also includes a `Collapse` monad for managing parallel computations and a `Book` data structure for storing function definitions and metadata.
+The compilation process translates high-level `Core` terms into low-level C code, which is then executed by the runtime. The runtime uses a memory model based on Interaction Combinators, with functions like `allocNode` and `set` managing memory allocation and term manipulation. The system supports both strict and lazy evaluation modes, with optimizations for parallel execution.
+Overall, the codebase is designed to handle complex, parallel computations efficiently, leveraging the Interaction Combinator model to achieve high performance on modern hardware.
+
+### Key Components:
+1. **Term Representation**:
+    - The `Term` data type is the core of the system, representing nodes in the computational graph. Each `Term` encodes a tag, label, and location, allowing the runtime to efficiently manage and process terms.
+    - Tags identify the type of the term (e.g., `ERA`, `REF`, `NUM`, `CON`, `DUP`), while labels provide additional metadata (e.g., function IDs, constructor IDs).
+    - Locations point to memory addresses where terms are stored, enabling efficient access and manipulation.
+
+2. **Reduction Engine**:
+    - The `reduce` function is the backbone of the evaluation mechanism. It applies reduction rules based on the term's type, handling operations like function application (`APP`), pattern matching (`MAT`), and duplication (`DUP`).
+    - The `reduceAt` function is a higher-level reduction engine that recursively reduces terms to their normal form, handling different term types with specific reduction rules.
+
+3. **Memory Management**:
+    - The `allocNode` function allocates memory for nodes in the runtime, ensuring efficient memory usage and supporting the massively parallel execution model.
+    - The `set` and `got` functions are used to write and retrieve terms from specific memory locations, enabling dynamic term manipulation.
+
+4. **Compilation**:
+    - The `compile` function orchestrates the compilation process, translating high-level `Core` terms into low-level C code. It supports different compilation modes (`compileFull`, `compileFast`, `compileSlow`) for various evaluation strategies.
+    - The `compileFastCore` function optimizes the compilation of terms for parallel execution, generating efficient C code for constructs like `Lam`, `App`, `Sup`, and `Dup`.
+
+5. **Parallel Computation**:
+    - The `Collapse` monad manages parallel computations, handling multiple possible outcomes or states and reducing them to a single value or a list of results.
+    - The `Sup` operation allows for the combination of two terms into a single superposed term, enabling parallel evaluation.
+
+6. **Book Data Structure**:
+    - The `Book` data structure stores function definitions and metadata, providing quick access to the necessary information for compilation and execution.
+    - It includes mappings for function IDs, names, labels, and constructors, ensuring efficient lookup and management of runtime resources.
+
+7. **Interaction Combinators**:
+    - The runtime is built around the Interaction Combinator model, which enables parallel evaluation of terms through a graph-based computational model.
+    - Functions like `reduce_ref_sup`, `reduce_dup_lam`, and `reduce_mat_ctr` handle specific interaction rules, ensuring correct and efficient execution.
+
+### Logical Flow:
+1. **Parsing and Compilation**:
+    - The input program is parsed into a high-level `Core` representation.
+    - The `compile` function translates the `Core` terms into low-level C code, optimizing for parallel execution.
+
+2. **Runtime Initialization**:
+    - The runtime initializes the memory model and sets up the necessary data structures (e.g., `Book`, `State`).
+
+3. **Term Reduction**:
+    - The `reduceAt` function reduces the main term to its normal form, applying reduction rules based on the term's type.
+    - The `reduce` function handles specific reduction operations, ensuring that all subterms are fully evaluated.
+
+4. **Parallel Execution**:
+    - The `Collapse` monad manages parallel computations, reducing multiple outcomes to a single result.
+    - The `Sup` operation enables parallel evaluation of terms, leveraging the massively parallel hardware.
+
+5. **Memory Management**:
+    - The `allocNode` function allocates memory for new nodes, while `set` and `got` manage term manipulation and access.
+    - The runtime ensures efficient memory usage, supporting the parallel execution model.
+
+6. **Output and Debugging**:
+    - The `print_term` function provides debugging and diagnostic output, allowing developers to inspect the state of the computation.
 """.strip()
 
-def format_contexts(hs_ctx: FileContext, c_ctx: FileContext):
-    skeleton1 = hs_ctx.stringify(line_number=True)
-    skeleton2 = c_ctx.stringify(line_number=True)
+def format_contexts(hs_ctx: FileContext, c_ctx: FileContext, line_number: bool = False):
+    skeleton1 = hs_ctx.stringify(line_number=line_number)
+    skeleton2 = c_ctx.stringify(line_number=line_number)
     context = ""
     if skeleton1: context += f"./hvm.hs:\n{skeleton1}\n---------\n"
     if skeleton2: context += f"./hvm.c:\n{skeleton2}\n---------\n"
@@ -511,15 +584,15 @@ class CodeSymbol:
 
 @dataclass
 class BlockNumber:
+    reasoning: str
     number: int
     confidence: float
 
 @dataclass
 class RefactoringAnalysis:
     explanation: str
+    thinking: str
     relevancy: float
-    code_symbols: List[CodeSymbol]
-    reasoning: str
     block_numbers: list[BlockNumber]
 
 def parse_explanation(text: str) -> str:
@@ -531,43 +604,14 @@ def parse_explanation(text: str) -> str:
 
 def parse_block_numbers(text: str) -> list[BlockNumber]:
     """Parse the block numbers section into list of (number, confidence) pairs"""
-    match = re.search(r'<block_numbers>(.*?)</block_numbers>', text, re.DOTALL)
+    match = re.search(r'<relevant_block_numbers>(.*?)</relevant_block_numbers>', text, re.DOTALL)
     if not match: return []
     content = match.group(1).strip()
-    return [BlockNumber(int(num), float(conf)) for num, conf in re.findall(r'<block_number>(.*?)</block_number><confidence>(.*?)</confidence>', content)]
-
-def parse_code_symbols(text: str) -> tuple[List[CodeSymbol], str]:
-    """Parse the code symbols section, returns (symbols, reasoning)"""
-    # Extract content between <relevant_code_symbols> tags
-    match = re.search(r'<relevant_code_symbols>(.*?)</relevant_code_symbols>', text, re.DOTALL)
-    if not match:
-        return [], ""
-    
-    content = match.group(1).strip()
-    symbols = []
-    reasoning = ""
-    
-    # Extract reasoning
-    reason_match = re.search(r'<reasoning>(.*?)</reasoning>', content, re.DOTALL)
-    if reason_match:
-        reasoning = reason_match.group(1).strip()
-    
-    # Parse symbols
-    symbol_pattern = r'<name>(.*?)</name><relevancy>(.*?)</relevancy>'
-    for name_match, rel_match in re.findall(symbol_pattern, content):
-        try:
-            relevancy = float(rel_match)
-            symbols.append(CodeSymbol(name_match.strip(), relevancy))
-        except ValueError:
-            continue
-            
-    return symbols, reasoning
+    return [BlockNumber(reasoning, int(num), float(conf)) for reasoning, num, conf in re.findall(r'<reasoning>(.*?)</reasoning><block_number>(.*?)</block_number><confidence>(.*?)</confidence>', content)]
 
 def parse_refactoring_analysis(text: str) -> RefactoringAnalysis:
     """Parse the complete analysis output format"""
     explanation = parse_explanation(text)
-    
-    # Parse relevancy
     relevancy = 0.0
     rel_match = re.search(r'<relevancy>(.*?)</relevancy>', text)
     if rel_match:
@@ -575,28 +619,28 @@ def parse_refactoring_analysis(text: str) -> RefactoringAnalysis:
             relevancy = float(rel_match.group(1))
         except ValueError:
             pass
-    code_symbols, reasoning = parse_code_symbols(text)
+    thinking = re.search(r'<thinking>(.*?)</thinking>', text)
+    if thinking: thinking = thinking.group(1)
     block_numbers = parse_block_numbers(text)
     return RefactoringAnalysis(
         explanation=explanation,
+        thinking=thinking,
         relevancy=relevancy,
-        reasoning=reasoning,
-        code_symbols=code_symbols,
         block_numbers=block_numbers
     )
 
-async def understand_and_classify_symbols_parallel(query: str, names: list[str]):
+async def understand_and_classify_symbols_parallel(query: str, names: list[str], hs_nodes: list[Node], c_nodes: list[Node], model: str):
     """Run multiple symbol classifications in parallel"""
     tasks = []
     for name in names:
-        task = asyncio.create_task(understand_and_classify_symbol_async(query, name))
+        task = asyncio.create_task(understand_and_classify_symbol_async(query, name, hs_nodes, c_nodes, model))
         tasks.append(task)
     results = await asyncio.gather(*tasks)
     return results
 
-async def understand_and_classify_symbol_async(query: str, name: str):
+async def understand_and_classify_symbol_async(query: str, name: str, hs_nodes: list[Node], c_nodes: list[Node], model: str):
     """Single mega-prompt called in parallel for each name."""
-    hs_ctx, c_ctx = create_contexts_for_name(name)
+    hs_ctx, c_ctx = create_contexts_for_name(name, hs_nodes, c_nodes)
     codebase_context = format_contexts(hs_ctx, c_ctx)
     messages = [
         Message(role="system", content=f"""
@@ -604,10 +648,8 @@ async def understand_and_classify_symbol_async(query: str, name: str):
 - You are given code related to "{name}" in the HVM3 codebase.
 
 1. Summarize the role and purpose of "{name}" into a concise markdown tree within <explanation>...</explanation> tags.
-2. Think about whether any of the related code is relevant to the refactoring query. Rate the overall relevancy from 0 to 1 within <relevancy>...</relevancy> tags.
-3. List the functions or types that contain code which would get changed by the refactoring by reasoning step-by-step within <reasoning>...</reasoning> tags.
-4. If some code inside a function or type will get changed by the refactoring, list the name of the function or type exactly as it appears in the codebase.
-5. Finally, list the specific block numbers of the code that you are sure will get changed in the refactoring. Only list blocks that you are confident are relevant to the refactoring.
+2. Think about whether any of the code is relevant to the refactoring query in <thinking>...</thinking> tags. Rate the overall relevancy from 0 to 1 within <relevancy>...</relevancy> tags.
+3. Only list the BLOCK numbers for code blocks that will definitely require editing in the refactoring. If there are none, simply return an empty list.
 
 # Output Format
 
@@ -616,21 +658,18 @@ async def understand_and_classify_symbol_async(query: str, name: str):
   - description 1
 - **title 2**
   - description 2
-- ...
-  - ...
+- **Refactoring Context**
+  - The query involves refactoring ...
+  - This change will affect...
 </explanation>
+<thinking>Are there any blocks that will definitely require editing? ...</thinking>
 <relevancy>0-1</relevancy>
-<relevant_code_symbols>
-<reasoning>If the refactoring is performed, the following code symbols or code within their scope will/will not need to change because...</reasoning>
-- <name>name 1</name><relevancy>0-1</relevancy>
-- <name>name 2</name><relevancy>0-1</relevancy>
+<relevant_block_numbers>
+- <reasoning>This block will definitely require editing because...</reasoning><block_number>1</block_number><confidence>0-1</confidence>
 - ...
-</relevant_code_symbols>
-<block_numbers>
-- <block_number>1</block_number><confidence>0-1</confidence>
-- <block_number>2</block_number><confidence>0-1</confidence>
-- ...
-</block_numbers>
+</relevant_block_numbers>
+
+If there are no relevant blocks, simply return an empty list.
 """.strip()),
         Message(role="user", content=f"""
 # Codebase Summary
@@ -644,7 +683,7 @@ async def understand_and_classify_symbol_async(query: str, name: str):
 """.strip()),
     ]
     print_msg(messages)
-    resp_msg = Message(role="assistant", content=await achat(messages=messages, model=deepseek))
+    resp_msg = Message(role="assistant", content=await achat(messages=messages, model=model))
     print_msg(resp_msg)
     parsed = parse_refactoring_analysis(resp_msg.content)
     print(parsed)
@@ -654,12 +693,138 @@ def count_tokens(text: str) -> int:
     return len(tiktoken.get_encoding("cl100k_base").encode(text))
 
 if __name__ == "__main__":
-    hvm_names = get_all_names()
+    hvm_names, hs_nodes, c_nodes = get_all_names()
+    # hs_ctx, c_ctx = create_contexts_for_name(hvm_names[0], hs_nodes, c_nodes)
+    # print(format_contexts(hs_ctx, c_ctx))
+
+    # results: list[RefactoringAnalysis] = asyncio.run(
+    #     understand_and_classify_symbols_parallel(
+    #         example_queries[5],
+    #         hvm_names,
+    #         hs_nodes,
+    #         c_nodes,
+    #         model="deepseek-chat"
+    #     )
+    # )
+    # all_blocks: list[BlockNumber] = [block for result in results for block in result.block_numbers]
+    # high_confidence_blocks: list[BlockNumber] = sorted({block.number: block for block in all_blocks if block.confidence >= 0.9}.values(), key=lambda x: x.number)
+    # print(f"number of high confidence blocks: {len(high_confidence_blocks)}")
+    # for block in high_confidence_blocks:
+    #     print(block.number)
+    #     print(block.reasoning)
+    #     print(block.confidence)
+    #     print('----')
+
+    import dspy
+    from llms import model_to_provider, provider_to_api_key, provider_to_base_url
+    from typing import Literal
+
+    model = "deepseek/deepseek-chat"
+    lm = dspy.LM(
+        model=model,
+        api_key=provider_to_api_key[model_to_provider[model]],
+        api_base=provider_to_base_url[model_to_provider[model]],
+        max_tokens=3000
+        #cache=False
+    )
+
+    dspy.configure(lm=lm, async_max_workers=300)
+
+    class ExplainCodebaseSymbol(dspy.Signature):
+        """Explain the purpose and role of the given codebase symbol within the codebase."""
+        codebase_summary: str = dspy.InputField()
+        codebase_symbol: str = dspy.InputField()
+        codebase_context: str = dspy.InputField()
+        explanation: str = dspy.OutputField()
+
+    class SummarizeCodebase(dspy.Signature):
+        """Summarize the main flow of the codebase into notes for a technical audience."""
+        codebase_name: str = dspy.InputField()
+        codebase_context: str = dspy.InputField()
+        symbol_explanations: list[str] = dspy.InputField()
+        detailed_summary: str = dspy.OutputField()
+
+    summarize_codebase = dspy.ChainOfThoughtWithHint(SummarizeCodebase)
+    explain_symbol = dspy.asyncify(dspy.ChainOfThought(ExplainCodebaseSymbol))
+
+    async def run_parallel_tasks_with_progress(tasks: list[Callable], desc: str = "Tasks") -> list[Any]:
+        time_start = time.time()
+        async def wrapped_task(task: Callable, index: int, pbar: tqdm) -> tuple[int, Any]:
+            result = await task()
+            pbar.update(1)
+            return index, result
+        with tqdm(total=len(tasks), desc=desc) as pbar:
+            results = await asyncio.gather(*[
+                wrapped_task(task, i, pbar) 
+                for i, task in enumerate(tasks)
+            ])
+        time_end = time.time()
+        print(f"{desc}: time taken: {time_end - time_start}")
+        return [result for _, result in sorted(results, key=lambda x: x[0])]
+
+    async def explain_symbols_async(names: list[str]):
+        tasks = [
+            lambda name=name: explain_symbol(
+                codebase_summary=codebase_summary,
+                codebase_symbol=name, 
+                codebase_context=format_contexts(*create_contexts_for_name(name, hs_nodes, c_nodes))
+            )
+            for name in names
+        ]
+        return await run_parallel_tasks_with_progress(tasks, desc="Explaining symbols")
+
+    explanations = asyncio.run(explain_symbols_async(hvm_names))
+    symbol_explanations = [(name, explanation.explanation) for name, explanation in zip(hvm_names, explanations)]
+    print(symbol_explanations[0:3])
+    symbol_explanation_map = {name: explanation for name, explanation in symbol_explanations}
+
+    # sorted_symbol_explanations = sorted(symbol_explanations, key=lambda x: num_mentions(x[0]), reverse=True)[:50]
+    # skeleton = codebase_skeleton()
+    # new_codebase_summary = summarize_codebase(
+    #     codebase_name="HVM3",
+    #     codebase_context=skeleton,
+    #     symbol_explanations=[f"{name}: {explanation}" for name, explanation in sorted_symbol_explanations],
+    #     hint="Summarize the main logical flow of the codebase"
+    # )
+    # print(new_codebase_summary)
+    # print(lm.history[-1])
+
+    # model = "openrouter/meta-llama/llama-3.1-8b-instruct"
+    lm = dspy.LM(
+        model=model,
+        api_key=provider_to_api_key[model_to_provider[model]],
+        api_base=provider_to_base_url[model_to_provider[model]],
+        max_tokens=3000
+        # cache=False
+    )
+
+    dspy.configure(lm=lm, async_max_workers=300)
+    
+    class Block(BaseModel):
+        number: int
+        reasoning: str
+        confidence: float
+
+    class ClassifyBlocksToEdit(dspy.Signature):
+        """Classify which blocks **must** be edited during a refactor."""
+        codebase_summary: str = dspy.InputField()
+        refactoring_task: str = dspy.InputField()
+        codebase_symbol: str = dspy.InputField(desc="The name of the codebase symbol that may or may not be relevant to the refactoring task")
+        codebase_symbol_explanation: str = dspy.InputField()
+        codebase_context: str = dspy.InputField()
+
+        blocks: list[Block] = dspy.OutputField(desc="A list of each block that must be edited along with the reason why it must be edited and your confidence.")
+
     name = hvm_names[0]
-    hs_ctx, c_ctx = create_contexts_for_name(name)
-    formatted = format_contexts(hs_ctx, c_ctx)
-    print("---")
-    print(f"NAME: {name}\n{formatted}")
-    print(f"TOKENS: {count_tokens(formatted)}")
-    print("---")
-    # inspect_code()
+    classify = dspy.ChainOfThoughtWithHint(ClassifyBlocksToEdit)
+    output = classify(
+        codebase_summary=codebase_summary,
+        codebase_context=format_contexts(*create_contexts_for_name(name, hs_nodes, c_nodes)),
+        codebase_symbol=name,
+        codebase_symbol_explanation=symbol_explanation_map[name],
+        refactoring_task=example_queries[0],
+        hint="Debate whether or not a block in the codebase context needs to be edited.",
+    )
+    print(output)
+    # print(lm.history[-1])
+

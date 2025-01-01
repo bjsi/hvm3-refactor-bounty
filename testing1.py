@@ -146,5 +146,5 @@ data Dag a =
 
 ctx = FileContext(file=".hs", content=code)
 print(ctx.stringify())
-ctx = ctx.show_scopes_mentioning("Book", scope="full", parents="all")
+ctx = ctx.show_lines_mentioning("Book", scope="full", parents="all")
 print(ctx.stringify())

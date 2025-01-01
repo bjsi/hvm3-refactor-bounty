@@ -14,16 +14,14 @@ Develop an AI tool that, given the current snapshot of HVM3's codebase and a ref
 ## Approach
 
 1. Separate the C code and Haskell code into two different files.
-2. Use tree-sitter to extract the 200 or so important code symbols (function names, type names, etc).
+2. Use tree-sitter to extract the 270 or so important code symbols (function names, type names, etc).
 3. For a given refactoring task, perform the following in parallel for every code symbol:
     - Extract the code and related context for the code symbol using tree-sitter.
     - Send to DeepSeek to determine whether the code symbol is relevant to the refactoring task.
     - Write a list of code symbol names that would be affected by the refactoring task.
     - Finally, decide which specific chunk numbers are affected by the refactoring task.
 
-NOTE: I think the chunk numbering isn't necessary, and that code symbol extraction using tree-sitter is a better way to go.
-
 ## Timings and costs
 
-- There are 200-250 code symbols
+- There are ~270 code symbols
 - ...
