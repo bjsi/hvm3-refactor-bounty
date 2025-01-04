@@ -1,0 +1,27 @@
+0	modify the tree flattening algorithm to use an iterative approach instead of recursion
+1	implement a caching system for frequently accessed metadata lookups
+2	extend Lam and App nodes to also store a label, just like Sups and Dups. the App-Lam rule must be updated so that, when the labels are different, the nodes will commute instead of beta-reducing
+3	extend the size of the addr field on runtime nodes from 32 to 40 bits, and reduce the label field from 24 to 16 bits
+4	modify the atomic value container to use 48-bit addresses and 16-bit type tags for better memory utilization
+5	implement automatic garbage collection for unused tree branches
+6	refactor the parallel execution engine to use work-stealing queues
+7	add support for circular reference detection during parallel execution
+8	add support for custom memory allocators in the atomic value container
+9	completely remove native numbers as a feature
+10	implement path optimization by merging overlapping bit-strings in the recursive tree structure when their patterns match
+11	implement a more efficient serialization format for stored definitions
+12	implement a more efficient pattern matching algorithm for tree traversal
+13	make CTRs store only the CID in the Lab field, and move the arity to a global static object in C
+14	replace the 'λx body' syntax by '\x body'
+15	implement a feature that prevents the user from creating two constructors with the same name. show a helpful error when that happens.
+16	modify the compilation pipeline to support incremental compilation
+17	modify the name resolution system to support hierarchical namespaces
+18	implement lazy evaluation for tree branch expansion
+19	refactor the error handling system to provide more detailed stack traces
+20	add Tup and Get constructors. Tup behaves similarly to a superposition of label 0, and is represented as (a,b). Get behaves similarly to a duplication with label 0, and is represented as ! (a,b) = x
+21	implement a more efficient string interning mechanism for identifier storage
+22	add support for concurrent metadata updates during runtime
+23	refactor the state management system to use immutable data structures
+24	measure interactions by interaction type instead of just storing the total count. report results segmented by interaction type
+25	refactor the state tracking system to use a persistent map instead of mutable references
+26	add runtime statistics collection for parallel path execution patterns
