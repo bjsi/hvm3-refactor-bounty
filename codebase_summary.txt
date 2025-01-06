@@ -1,0 +1,57 @@
+The HVM3 codebase is a highly parallel, functional runtime system designed to execute programs efficiently on massively parallel hardware. It is built around the Interaction Combinator model, which enables parallel evaluation of terms through a graph-based computational model. The codebase is divided into two main parts: the Haskell frontend (`hvm.hs`) and the C backend (`hvm.c`). The Haskell code handles high-level operations like parsing, compilation, and term manipulation, while the C code provides low-level runtime support for memory management, term reduction, and parallel execution.
+The core of the system revolves around the `Term` data type, which represents nodes in the computational graph. Each `Term` encodes a tag, label, and location, allowing the runtime to efficiently manage and process terms. The `reduce` function is the backbone of the evaluation mechanism, applying reduction rules based on the term's type. The system also includes a `Collapse` monad for managing parallel computations and a `Book` data structure for storing function definitions and metadata.
+The compilation process translates high-level `Core` terms into low-level C code, which is then executed by the runtime. The runtime uses a memory model based on Interaction Combinators, with functions like `allocNode` and `set` managing memory allocation and term manipulation. The system supports both strict and lazy evaluation modes, with optimizations for parallel execution.
+Overall, the codebase is designed to handle complex, parallel computations efficiently, leveraging the Interaction Combinator model to achieve high performance on modern hardware.
+
+### Key Components:
+1. **Term Representation**:
+    - The `Term` data type is the core of the system, representing nodes in the computational graph. Each `Term` encodes a tag, label, and location, allowing the runtime to efficiently manage and process terms.
+    - Tags identify the type of the term (e.g., `ERA`, `REF`, `NUM`, `CON`, `DUP`), while labels provide additional metadata (e.g., function IDs, constructor IDs).
+    - Locations point to memory addresses where terms are stored, enabling efficient access and manipulation.
+
+2. **Reduction Engine**:
+    - The `reduce` function is the backbone of the evaluation mechanism. It applies reduction rules based on the term's type, handling operations like function application (`APP`), pattern matching (`MAT`), and duplication (`DUP`).
+    - The `reduceAt` function is a higher-level reduction engine that recursively reduces terms to their normal form, handling different term types with specific reduction rules.
+
+3. **Memory Management**:
+    - The `allocNode` function allocates memory for nodes in the runtime, ensuring efficient memory usage and supporting the massively parallel execution model.
+    - The `set` and `got` functions are used to write and retrieve terms from specific memory locations, enabling dynamic term manipulation.
+
+4. **Compilation**:
+    - The `compile` function orchestrates the compilation process, translating high-level `Core` terms into low-level C code. It supports different compilation modes (`compileFull`, `compileFast`, `compileSlow`) for various evaluation strategies.
+    - The `compileFastCore` function optimizes the compilation of terms for parallel execution, generating efficient C code for constructs like `Lam`, `App`, `Sup`, and `Dup`.
+
+5. **Parallel Computation**:
+    - The `Collapse` monad manages parallel computations, handling multiple possible outcomes or states and reducing them to a single value or a list of results.
+    - The `Sup` operation allows for the combination of two terms into a single superposed term, enabling parallel evaluation.
+
+6. **Book Data Structure**:
+    - The `Book` data structure stores function definitions and metadata, providing quick access to the necessary information for compilation and execution.
+    - It includes mappings for function IDs, names, labels, and constructors, ensuring efficient lookup and management of runtime resources.
+
+7. **Interaction Combinators**:
+    - The runtime is built around the Interaction Combinator model, which enables parallel evaluation of terms through a graph-based computational model.
+    - Functions like `reduce_ref_sup`, `reduce_dup_lam`, and `reduce_mat_ctr` handle specific interaction rules, ensuring correct and efficient execution.
+
+### Logical Flow:
+1. **Parsing and Compilation**:
+    - The input program is parsed into a high-level `Core` representation.
+    - The `compile` function translates the `Core` terms into low-level C code, optimizing for parallel execution.
+
+2. **Runtime Initialization**:
+    - The runtime initializes the memory model and sets up the necessary data structures (e.g., `Book`, `State`).
+
+3. **Term Reduction**:
+    - The `reduceAt` function reduces the main term to its normal form, applying reduction rules based on the term's type.
+    - The `reduce` function handles specific reduction operations, ensuring that all subterms are fully evaluated.
+
+4. **Parallel Execution**:
+    - The `Collapse` monad manages parallel computations, reducing multiple outcomes to a single result.
+    - The `Sup` operation enables parallel evaluation of terms, leveraging the massively parallel hardware.
+
+5. **Memory Management**:
+    - The `allocNode` function allocates memory for new nodes, while `set` and `got` manage term manipulation and access.
+    - The runtime ensures efficient memory usage, supporting the parallel execution model.
+
+6. **Output and Debugging**:
+    - The `print_term` function provides debugging and diagnostic output, allowing developers to inspect the state of the computation.

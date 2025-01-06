@@ -32,9 +32,18 @@ async def run_dspy_parallel(predictor, examples: dspy.Example, desc: str = None)
     return await run_parallel_tasks_with_progress(tasks, desc=desc)
 
 def load_jsonl(path: str):
-    with open(path, "r") as f:
-        return [json.loads(line) for line in f]
+    with open(path, "r") as f: return [json.loads(line) for line in f]
+
+def save_jsonl(data: list[dict], path: str):
+    with open(path, "w") as f:
+        for item in data:
+            f.write(json.dumps(item) + "\n")
 
 def load_json(path: str):
-    with open(path, "r") as f:
-        return json.load(f)
+    with open(path, "r") as f: return json.load(f)
+
+def save_json(data: dict, path: str):
+    with open(path, "w") as f: json.dump(data, f)
+
+def load_text(path: str):
+    with open(path, "r") as f: return f.read()

@@ -1,122 +1,135 @@
+import asyncio
+import random
 import dspy
-from file_context import get_all_names
-from utils import load_json, load_jsonl
-import pydantic
+import dspy.teleprompt
+from llms import get_lm
+from utils import load_json, load_jsonl, run_dspy_parallel, save_json
 
-hvm_names = get_all_names()[0]
+###############################
+# determine relatedness
+# works w/ 8b models
+# works best w/ gemini-flash-8b
+###############################
 
-class CodebaseSymbolNumber(pydantic.BaseModel):
-    symbol_index: int = dspy.OutputField(desc="The index of the codebase symbol that is strongly related to the task.")
-    reasoning: str = dspy.OutputField(desc="Reasoning why the symbol is related to the task.")
-    confidence: float = dspy.OutputField(ge=0.0, le=1.0, desc="Confidence that the symbol is related to the task.")
-
-class DetermineCodeSymbolRelevancy(dspy.Signature):
-    """Use the symbol explanations to decide whether they are related to the task"""
-    symbol_explanations: str = dspy.InputField()
+class DetermineRelatedness(dspy.Signature):
+    """Use the codebase symbol explanation to decide whether it is directly involved in the task"""
+    symbol: str = dspy.InputField()
+    explanation: str = dspy.InputField()
     task: str = dspy.InputField()
-    symbols: str = dspy.InputField(desc="Numbered codebase symbols")
-    strongly_related_symbols: list[CodebaseSymbolNumber] = dspy.OutputField(desc="Numbers corresponding to codebase symbols that are strongly related to the task.")
+    is_related: bool = dspy.OutputField()
+    confidence: float = dspy.OutputField(ge=0.0, le=1.0)
 
-class ClassifyRelatednessProgram(dspy.Module):
-    def __init__(self):
-        self.classify_relatedness = dspy.ChainOfThoughtWithHint(DetermineCodeSymbolRelevancy)
-
-    def forward(self, task: str, symbols: list[str], symbol_explanations: str) -> list[CodebaseSymbolNumber]:
-        hint = "For each symbol, think step-by-step about whether or not it is directly related to the task and why."
-        return self.classify_relatedness(symbol_explanations=symbol_explanations, task=task, symbols=symbols, hint=hint)
-    
-class GenerateRefactoringTasks(dspy.Signature):
-    """Generate 20 refactoring tasks in a similar style to the examples. Do not use direct names for symbols in the task descriptions. They should be indirect/colloquial names."""
-    codebase_summary: str = dspy.InputField()
-    examples: list[str] = dspy.InputField()
-    refactoring_tasks: list[str] = dspy.OutputField()
-
-def load_trainset():
+def load_symbol_task_relatedness_trainset(shuffle=True):
     devset = []
     symbol_explanations = [(row['name'], row['explanation']) for row in load_jsonl("symbol_explanations.jsonl")]
-    batch_size = 1
-    symbol_explanations_batched = [symbol_explanations[i:i+batch_size] for i in range(0, len(symbol_explanations), batch_size)]
-    tasks = load_json("hvm3_real_tasks.json")
-    for task, task_data in list(tasks.items()):
-        for symbol_explanations in symbol_explanations_batched:
-            symbols = [name for name, _ in symbol_explanations]
-            related_symbols = [s for s in task_data["related_symbols"] if s in symbols]
+    for task, task_data in load_json("hvm3_real_tasks.json").items():
+        for sym_exp in symbol_explanations:
+            symbol, explanation = sym_exp
             devset.append(
                 dspy.Example(
                     task=task,
-                    strongly_related_symbols=related_symbols,
-                    symbols=[f"{i}: {name}" for i, name in enumerate(symbols)],
-                    symbol_explanations="\n\n".join([f"{i}: {name}: {explanation}" for i, (name, explanation) in enumerate(symbol_explanations)])).with_inputs('task', 'symbols', 'symbol_explanations')
-                )
+                    symbol=symbol,
+                    explanation=explanation,
+                    is_related=symbol in task_data["related_symbols"]
+                ).with_inputs('task', 'symbol', 'explanation')
+            )
+    if shuffle: random.shuffle(devset)
     return devset
 
-def filter_symbols(symbols: list[CodebaseSymbolNumber]) -> list[str]:
-    return sorted([symbol.symbol for symbol in symbols if symbol.symbol in hvm_names and symbol.relevancy_score >= 0.9])
-
 def score_response(example, pred, trace=None):
-    # Calculate similarity with reduced penalty for extra predictions
-    # Basically a modified Jaccard similarity 0-1 between predicted and example symbols
-    # Uses intersection over union: |A ∩ B| / |A ∪ B|
-    example_symbols = set(example.strongly_related_symbols)
-    pred_symbols = set(filter_symbols(pred.strongly_related_symbols))
-    intersection = len(example_symbols & pred_symbols)
-    extra_predictions = len(pred_symbols - example_symbols)
-    if not example_symbols | pred_symbols: return 1.0
-    return intersection / (len(example_symbols) + (1 * extra_predictions))
+    return 1 if example.is_related == pred.is_related else 0
 
-def evaluate(devset):
-    evaluator = dspy.Evaluate(devset=devset, num_threads=10, display_progress=True, display_table=5)
-    evaluator(ClassifyRelatednessProgram(), metric=score_response)
+# llama8b gets ~73% accuracy on this unoptimized
+# gemini-flash-8b gets ~83% accuracy on this unoptimized
+# gemini-flash-8b gets ~90% accuracy on this optimized
 
-def optimize_for(devset, task_lm, prompt_lm, save_name):
+def optimize_for(program, devset, task_lm, prompt_lm, save_name):
     with dspy.context(lm=task_lm):
-        tp = dspy.MIPROv2(metric=score_response, auto="light", prompt_model=prompt_lm, task_model=task_lm)
-        program = ClassifyRelatednessProgram()
-        optimized_classify = tp.compile(program, trainset=devset, max_labeled_demos=3, max_bootstrapped_demos=3)
-        optimized_classify.save(f"optimized_classify_{save_name}.pkl")
+        tp = dspy.teleprompt.MIPROv2(metric=score_response, auto="light", prompt_model=prompt_lm, task_model=task_lm, max_bootstrapped_demos=0, max_labeled_demos=0, num_threads=20)
+        optimized_classify = tp.compile(program, trainset=devset)
+        optimized_classify.save(f"optimized_classify_{save_name}.json")
+    return optimized_classify
 
-fake_tasks = [
-    "implement path optimization by merging overlapping bit-strings in the recursive tree structure when their patterns match",
-    "modify the atomic value container to use 48-bit addresses and 16-bit type tags for better memory utilization",
-    "refactor the state tracking system to use a persistent map instead of mutable references",
-    "add support for circular reference detection during parallel execution",
-    "modify the tree flattening algorithm to use an iterative approach instead of recursion",
-    "implement a caching system for frequently accessed metadata lookups",
-    "refactor the parallel execution engine to use work-stealing queues",
-    "add runtime statistics collection for parallel path execution patterns",
-    "implement automatic garbage collection for unused tree branches",
-    "modify the name resolution system to support hierarchical namespaces",
-    "implement a more efficient string interning mechanism for identifier storage",
-    "refactor the error handling system to provide more detailed stack traces",
-    "implement lazy evaluation for tree branch expansion",
-    "add support for custom memory allocators in the atomic value container",
-    "refactor the state tracking system to use a persistent map instead of mutable references",
-    "add support for circular reference detection during parallel execution",
-    "modify the tree flattening algorithm to use an iterative approach instead of recursion",
-    "implement a caching system for frequently accessed metadata lookups",
-    "refactor the parallel execution engine to use work-stealing queues",
-    "add runtime statistics collection for parallel path execution patterns",
-    "implement automatic garbage collection for unused tree branches",
-    "modify the name resolution system to support hierarchical namespaces",
-    "implement a more efficient string interning mechanism for identifier storage",
-    "refactor the error handling system to provide more detailed stack traces",
-    "implement lazy evaluation for tree branch expansion",
-    "add support for custom memory allocators in the atomic value container",
-    "refactor the state tracking system to use a persistent map instead of mutable references",
-    "add support for circular reference detection during parallel execution",
-    "modify the tree flattening algorithm to use an iterative approach instead of recursion",
-    "implement a caching system for frequently accessed metadata lookups",
-    "refactor the parallel execution engine to use work-stealing queues",
-    "add runtime statistics collection for parallel path execution patterns",
-    "implement automatic garbage collection for unused tree branches",
-    "modify the name resolution system to support hierarchical namespaces",
-    "implement a more efficient string interning mechanism for identifier storage",
-    "refactor the error handling system to provide more detailed stack traces",
-    "implement lazy evaluation for tree branch expansion",
-    "add support for custom memory allocators in the atomic value container",
-    "modify the compilation pipeline to support incremental compilation",
-    "implement a more efficient pattern matching algorithm for tree traversal",
-    "refactor the state management system to use immutable data structures",
-    "add support for concurrent metadata updates during runtime",
-    "implement a more efficient serialization format for stored definitions",
-]
+def evaluate(model, program, devset):
+    with dspy.context(lm=model):
+        dspy.Evaluate(devset=devset, metric=score_response, num_threads=8, display_progress=True, display_table=True)(program)
+
+def get_related_symbols(tasks):
+    symbol_explanations = [(row['name'], row['explanation']) for row in load_jsonl("symbol_explanations.jsonl")]
+    examples = []
+    for task in tasks:
+        for symbol, explanation in symbol_explanations:
+            examples.append(
+                dspy.Example(
+                    task=task,
+                    symbol=symbol,
+                    explanation=explanation,
+                ).with_inputs('task', 'symbol', 'explanation')
+            )
+    dspy.configure(lm=get_lm("gemini/gemini-1.5-flash-8b"), async_max_workers=100)
+    program = dspy.ChainOfThoughtWithHint(DetermineRelatedness)
+    program.load(f"optimized_classify_gemini.pkl")
+    results = asyncio.run(run_dspy_parallel(program, examples))
+    task_to_related_symbols = {}
+    for example, result in zip(examples, results):
+        if example.task not in task_to_related_symbols:
+            task_to_related_symbols[example.task] = {"related_symbols": []}
+        if result.is_related:
+            task_to_related_symbols[example.task]["related_symbols"].append(example.symbol)
+    return task_to_related_symbols
+
+###########################################################################
+# create fake tasks
+# works fine with deepseek
+# tasks only used for training retriever - don't need to be ultra-realistic
+###########################################################################
+
+class CreateFakeTasks(dspy.Signature):
+    """
+    Use the codebase symbol explanation to create a new tasks in the same style as the examples.
+    Don't refer directly to the symbol names. Only refer to them indirectly.
+    """
+    examples: str = dspy.InputField()
+    explanations: str = dspy.InputField()
+    tasks: list[str] = dspy.OutputField(desc="A list of tasks referring indirectly to the symbol names")
+
+def load_create_fake_tasks_trainset(shuffle=True):
+    devset = []
+    symbol_explanations = [(row['name'], row['explanation']) for row in load_jsonl("symbol_explanations.jsonl")]
+    batch_size = 10
+    symbol_explanations_batched = [symbol_explanations[i:i+batch_size] for i in range(0, len(symbol_explanations), batch_size)]
+    real_tasks = load_json("hvm3_real_tasks.json").keys()
+    for sym_exp_batch in symbol_explanations_batched:
+        devset.append(
+            dspy.Example(
+                examples="\n".join(real_tasks),
+                explanations="\n\n".join([f"{sym_exp[0]}: {sym_exp[1]}" for sym_exp in sym_exp_batch]),
+            ).with_inputs('examples', 'explanations')
+        )
+    if shuffle: random.shuffle(devset)
+    return devset
+
+def load_fake_tasks():
+    return load_json("hvm3_fake_tasks.json")
+
+def create_fake_tasks(trainset, save=False):
+    with dspy.context(lm=get_lm("deepseek/deepseek-chat"), async_max_workers=100):
+        program = dspy.Predict(CreateFakeTasks)
+        results = asyncio.run(run_dspy_parallel(program, trainset))
+    fake_tasks = load_fake_tasks()
+    for result in results:
+        for task in result.tasks:
+            fake_tasks[task] = {}
+    if save: save_json(fake_tasks, "hvm3_fake_tasks.json")
+    return results
+
+###########################################################################
+# train retriever and evaluate vs LM
+###########################################################################
+
+
+
+if __name__ == "__main__":
+    fake_tasks = load_fake_tasks()
+    related_symbols = get_related_symbols(fake_tasks.keys())
+    save_json(related_symbols, "related_symbols.json")

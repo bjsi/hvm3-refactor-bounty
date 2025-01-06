@@ -1,4 +1,5 @@
 import contextlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -7,10 +8,10 @@ from file_context import get_all_names
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List
-from retrieval_data import fake_data
-from main import hvm3_dataset
 from ragatouille.RAGTrainer import RAGTrainer
 from ragatouille.RAGPretrainedModel import RAGPretrainedModel
+
+from utils import load_json, load_jsonl
 
 os.environ['COLBERT_LOAD_TORCH_EXTENSION_VERBOSE'] = "False"
 
@@ -82,13 +83,16 @@ class Colbert:
     elif self.model_path().exists():
       print(f"model already exists at {self.model_path()}")
       return
-    for task in fake_data:
-      for symbol in task[1]:
-        my_data.append((task[0], symbol))
-    for task in hvm3_dataset:
-      task_str = task.task
-      for symbol in task.related_symbols:
-        my_data.append((task_str, symbol))
+    with open("related_symbols.json", "r") as f:
+      fake_tasks = json.load(f)
+    # symbol_explanations = {exp["name"]: exp["explanation"] for exp in load_jsonl("symbol_explanations.jsonl")}
+    for task in fake_tasks:
+      for symbol in fake_tasks[task]["related_symbols"]:
+        my_data.append((task, symbol))
+    # for task in hvm3_dataset:
+    #   task_str = task.task
+    #   for symbol in task.related_symbols:
+    #     my_data.append((task_str, symbol_explanations[symbol]))
     trainer = RAGTrainer(
         pretrained_model_name="answerdotai/answerai-colbert-small-v1",
         model_name=self.model_name,
@@ -177,12 +181,19 @@ def print_results(res):
 
 if __name__ == "__main__":
   colbert1 = Colbert(model_name="codebase_symbols_finetune", index_name="codebase_symbols")
-#   colbert1.train()
-  query = "extend Lam and App nodes to also store a label, just like Sups and Dups. the App-Lam rule must be updated so that, when the labels are different, the nodes will commute instead of beta-reducing"
-  res = colbert1.search(query)
+  colbert1 = colbert1.train()
+  real_tasks = load_json("hvm3_real_tasks.json")
+  query = list(real_tasks.keys())[3]
+  symbols = real_tasks[query]["related_symbols"]
+  res = colbert1.search(query, k=20)
+
   print_results(res)
   print('---')
-#   colbert1.train()
-  colbert2 = Colbert()
-  res = colbert2.search(query)
-  print_results(res)
+  print("real symbols")
+  print("\n".join(symbols))
+  print('---')
+  print(f"task: {query}")
+# #   colbert1.train()
+#   colbert2 = Colbert()
+#   res = colbert2.search(query)
+#   print_results(res)

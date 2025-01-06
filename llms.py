@@ -7,10 +7,13 @@ load_dotenv()
 
 provider_to_api_key = {
     "openrouter": os.getenv("OPENROUTER_API_KEY"),
+    "gemini": os.getenv("GEMINI_API_KEY"),
     "deepseek": os.getenv("DEEPSEEK_API_KEY"),
 }
 
 model_to_provider = {
+    "gemini/gemini-1.5-flash-8b": "gemini",
+    "gemini/gemini-1.5-flash": "gemini",
     "meta-llama/llama-3.1-8b-instruct": "openrouter",
     "openrouter/meta-llama/llama-3.1-8b-instruct": "openrouter",
     "openrouter/anthropic/claude-3.5-sonnet-20240620": "openrouter",
@@ -21,6 +24,7 @@ model_to_provider = {
 provider_to_base_url = {
     "openrouter": "https://openrouter.ai/api/v1",
     "deepseek": "https://api.deepseek.com",
+    "gemini": None
 }
 
 def get_lm(model: str):
