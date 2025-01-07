@@ -1,6 +1,6 @@
 env
 .env
 build
-__pycache__/*
+__pycache__
+**/__pycache__
 .ragatouille
-data

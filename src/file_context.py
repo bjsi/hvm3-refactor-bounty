@@ -1,17 +1,16 @@
-import os
 import re
 from typing import Literal, Optional
-
 from tree_sitter import Language, Node, Parser
 from tree_sitter_languages import get_language, get_parser
+from src.filesystem import tree_sitter_haskell_dir, tree_sitter_haskell_lib, data_dir
 
 
 def setup_tree_sitter(file: str):
     ext = file.split('.')[1]
-    if ext == "hs": # outdated in tree-sitter-languages
-        if not os.path.exists('build/haskell.so'):
-            Language.build_library('build/haskell.so', ['./tree-sitter-haskell'])
-        HASKELL_LANGUAGE = Language('build/haskell.so', 'haskell')
+    if ext == "hs":
+        if not tree_sitter_haskell_lib.exists():
+            Language.build_library(tree_sitter_haskell_lib, [tree_sitter_haskell_dir])
+        HASKELL_LANGUAGE = Language(tree_sitter_haskell_lib, 'haskell')
         parser = Parser()
         parser.set_language(HASKELL_LANGUAGE)
         return parser, HASKELL_LANGUAGE
@@ -53,11 +52,13 @@ class EmptyNode:
         self.start_point = start_point
         self.end_point = end_point
 
-# should get reset between LLM calls in case of changes to the codebase
+# NOTE: should get reset between LLM calls in case of changes to the codebase
 _parse_cache = {}
 
 class FileContext:
-    """Tree of context for a single source code file. Show nodes using the `show` methods."""
+    """Tree of context for a single source code file. Show nodes using the `show` methods.
+    Originally forked from: https://github.com/Aider-AI/grep-ast
+    """
     def __init__(self, file: Optional[str] = None, content: Optional[str] = None):
         self.file = file
         if content: self.code = content
@@ -208,28 +209,22 @@ class FileContext:
         return self
     
     def show_all(self):
-        self.show(line_range=(0, -1), scope="line", parents="none")
-        return self
+        return self.show(line_range=(0, -1), scope="line", parents="none")
     
     def show_skeleton(self, full_types: bool = False):
         if full_types: self.show(query=self.types_query(), scope="full", parents="none")
-        self.show(query=self.definition_query(), scope="line", parents="none")
-        return self
+        return self.show(query=self.definition_query(), scope="line", parents="none")
     
     def merge(self, other: "FileContext"):
         self.show_indices.update(other.show_indices)
         return self
     
     def walk_tree(self, node, depth=0):
-        start = node.start_point
-        end = node.end_point
-        start_line = start[0]
-        end_line = end[0]
+        start_line = node.start_point[0]
+        end_line = node.end_point[0]
         self.nodes[start_line].append(node)
-        for i in range(start_line, end_line + 1):
-            self.scopes[i].add(start_line)
-        for child in node.children:
-            self.walk_tree(child, depth + 1)
+        for i in range(start_line, end_line + 1): self.scopes[i].add(start_line)
+        for child in node.children: self.walk_tree(child, depth + 1)
         return start_line, end_line
     
     def stringify(self, line_number=True):
@@ -259,44 +254,45 @@ class FileContext:
     
 def get_all_names():
     """Get all useful code symbol names across the codebase."""
-    ctx = FileContext("hvm-code.c")
+    ctx = FileContext(data_dir / "hvm-code.c")
     c_nodes = ctx.query(ctx.definition_query(include_body=False))
 
     c_names = set([node.text.decode("utf-8") for node in c_nodes if node.type == "identifier" or node.type == "type_identifier"])
     print(f"c file found {len(c_names)} names")
 
-    ctx = FileContext("hvm-code.hs")
+    ctx = FileContext(data_dir / "hvm-code.hs")
     hs_nodes = ctx.query(ctx.definition_query())
     hs_names = set([node.text.decode("utf-8") for node in hs_nodes])
 
     all_names = c_names.union(hs_names)
     print(f"all files found {len(all_names)} names")
-    ret = sorted(all_names)
-    return ret, hs_nodes, c_nodes
+    all_names = sorted(all_names)
+    return all_names, hs_nodes, c_nodes
 
-def create_contexts_for_name(name: str, hs_nodes: list[Node], c_nodes: list[Node]):
+def create_contexts_for_name(name: str, hs_nodes: list[Node], c_nodes: list[Node], definitions_only: bool = False):
     """To create context for a particular name, we simply show every line that mentions the name.
     We also include variations of the name - camel case, snake case, etc.
     We also include nearby block numbers.
     """
-    hs_ctx = FileContext("hvm-code.hs")
-    c_ctx = FileContext("hvm-code.c")
+    hs_ctx = FileContext(data_dir / "hvm-code.hs")
+    c_ctx = FileContext(data_dir / "hvm-code.c")
 
     # show the main definition
     # avoiding re-querying through tree-sitter because it's slow if you do it 200+ times
     name_query = "|".join([f"^{name}$", f"^{camel_to_snake(name)}$", f"^{snake_to_camel(name)}$"])
-    hs_nodes_for_name = [n.start_point[0] for n in hs_nodes if re.match(name_query, n.text.decode("utf-8"))]
-    c_nodes_for_name = [n.start_point[0] for n in c_nodes if re.match(name_query, n.text.decode("utf-8"))]
+    hs_nodes_for_name = [n.start_point[0] + 1 for n in hs_nodes if re.match(name_query, n.text.decode("utf-8"))]
+    c_nodes_for_name = [n.start_point[0] + 1 for n in c_nodes if re.match(name_query, n.text.decode("utf-8"))]
     hs_ctx.show(lines=hs_nodes_for_name, scope="full", parents="all", last_line=False)
     c_ctx.show(lines=c_nodes_for_name, scope="full", parents="all", last_line=False)
 
-    # show all lines mentioning the name, including some context
-    hs_ctx.show_lines_mentioning(name, scope="line")
-    c_ctx.show_lines_mentioning(name, scope="line")
+    if not definitions_only:
+        # show all lines mentioning the name, including some context
+        hs_ctx.show_lines_mentioning(name, scope="line")
+        c_ctx.show_lines_mentioning(name, scope="line")
 
-    # include block numbers
-    hs_ctx.show_nearby_block_nums()
-    c_ctx.show_nearby_block_nums()
+        # include block numbers
+        hs_ctx.show_nearby_block_nums()
+        c_ctx.show_nearby_block_nums()
     return hs_ctx, c_ctx
 
 def format_contexts(hs_ctx: FileContext, c_ctx: FileContext, line_number: bool = False):
@@ -308,8 +304,8 @@ def format_contexts(hs_ctx: FileContext, c_ctx: FileContext, line_number: bool =
     return context.strip()
 
 def codebase_skeleton():
-    hs_ctx = FileContext("hvm-code.hs")
-    c_ctx = FileContext("hvm-code.c")
+    hs_ctx = FileContext(data_dir / "hvm-code.hs")
+    c_ctx = FileContext(data_dir / "hvm-code.c")
     hs_ctx.show_skeleton(full_types=True)
     c_ctx.show_skeleton(full_types=True)
     return format_contexts(hs_ctx, c_ctx)
@@ -347,8 +343,18 @@ def inspect_code(code: str, lang: Literal[".hs", ".c"]):
     print_tree(tree.root_node, source_code=code)
 
 def num_mentions(name: str):
-    with open("hvm-code.hs", "r") as f:
+    with open(data_dir / "hvm-code.hs", "r") as f:
         hs_code = f.read()
-    with open("hvm-code.c", "r") as f:
+    with open(data_dir / "hvm-code.c", "r") as f:
         c_code = f.read()
     return hs_code.count(name) + c_code.count(name) + hs_code.count(camel_to_snake(name)) + hs_code.count(snake_to_camel(name)) + c_code.count(camel_to_snake(name)) + c_code.count(snake_to_camel(name))
+
+def most_mentioned_names():
+    all_names = get_all_names()[0]
+    return sorted(all_names, key=lambda x: num_mentions(x), reverse=True)
+
+if __name__ == "__main__":
+    all_names, hs_nodes, c_nodes = get_all_names()
+    hs_ctx, c_ctx = create_contexts_for_name("u12v2_y", hs_nodes, c_nodes, definitions_only=True)
+    s = format_contexts(hs_ctx, c_ctx)
+    print(s)

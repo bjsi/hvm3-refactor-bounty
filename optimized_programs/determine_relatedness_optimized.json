@@ -1,0 +1,73 @@
+{
+  "module": {
+    "lm": null,
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "Decide whether the codebase symbol is essential context for the task",
+      "fields": [
+        {
+          "prefix": "Symbol:",
+          "description": "${symbol}"
+        },
+        {
+          "prefix": "Explanation:",
+          "description": "${explanation}"
+        },
+        {
+          "prefix": "Task:",
+          "description": "${task}"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${produce the confidence}. We ..."
+        },
+        {
+          "prefix": "Is Related:",
+          "description": "${is_related}"
+        },
+        {
+          "prefix": "Confidence:",
+          "description": "${confidence}"
+        }
+      ]
+    },
+    "extended_signature": {
+      "instructions": "You are a seasoned software engineer specializing in compiler design and optimization.  Given a codebase symbol, a detailed explanation of the symbol's functionality, and a specific task related to enhancing the HVM3 runtime system (a parallel, graph-based computational model), determine whether the codebase symbol is essential context for completing the task.  Provide a detailed rationale explaining your decision, and express your confidence in your assessment as a probability score between 0.0 and 1.0.  The rationale should clearly articulate the connection (or lack thereof) between the symbol and the task, considering the broader context of the HVM3 system.",
+      "fields": [
+        {
+          "prefix": "Symbol:",
+          "description": "${symbol}"
+        },
+        {
+          "prefix": "Explanation:",
+          "description": "${explanation}"
+        },
+        {
+          "prefix": "Task:",
+          "description": "${task}"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${produce the confidence}. We ..."
+        },
+        {
+          "prefix": "Is Related:",
+          "description": "${is_related}"
+        },
+        {
+          "prefix": "Confidence:",
+          "description": "${confidence}"
+        }
+      ]
+    }
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.12.3",
+      "dspy": "2.5.43",
+      "cloudpickle": "3.1.0"
+    }
+  }
+}

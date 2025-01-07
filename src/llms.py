@@ -14,6 +14,7 @@ provider_to_api_key = {
 model_to_provider = {
     "gemini/gemini-1.5-flash-8b": "gemini",
     "gemini/gemini-1.5-flash": "gemini",
+    "gemini/gemini-1.5-pro": "gemini",
     "meta-llama/llama-3.1-8b-instruct": "openrouter",
     "openrouter/meta-llama/llama-3.1-8b-instruct": "openrouter",
     "openrouter/anthropic/claude-3.5-sonnet-20240620": "openrouter",
@@ -33,7 +34,6 @@ def get_lm(model: str):
         api_key=provider_to_api_key[model_to_provider[model]],
         api_base=provider_to_base_url[model_to_provider[model]],
         max_tokens=3000
-        #cache=False
     )
     return lm
 
