@@ -11,10 +11,15 @@ def count_tokens(text: str) -> int:
 
 async def run_parallel_tasks_with_progress(tasks: list[Callable], desc: str = "Tasks") -> list[Any]:
     time_start = time.time()
+    
     async def wrapped_task(task: Callable, index: int, pbar: tqdm) -> tuple[int, Any]:
-        result = await task()
-        pbar.update(1)
-        return index, result
+        try:
+            result = await task()
+            pbar.update(1)
+            return index, result
+        except Exception as e:
+            pbar.update(1)
+            return index, e
     with tqdm.tqdm(total=len(tasks), desc=desc) as pbar:
         results = await asyncio.gather(*[
             wrapped_task(task, i, pbar) 
@@ -25,10 +30,7 @@ async def run_parallel_tasks_with_progress(tasks: list[Callable], desc: str = "T
     return [result for _, result in sorted(results, key=lambda x: x[0])]
 
 async def run_dspy_parallel(predictor, examples: dspy.Example, desc: str = None):
-    tasks = [
-        lambda x=x: dspy.asyncify(predictor)(**x.inputs().toDict())
-        for x in examples
-    ]
+    tasks = [lambda x=x: dspy.asyncify(predictor)(**x.inputs().toDict()) for x in examples]
     return await run_parallel_tasks_with_progress(tasks, desc=desc)
 
 def load_jsonl(path: str):

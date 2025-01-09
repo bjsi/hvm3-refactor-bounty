@@ -1,23 +1,25 @@
+from pathlib import Path
 import re
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from tree_sitter import Language, Node, Parser
 from tree_sitter_languages import get_language, get_parser
 from src.filesystem import tree_sitter_haskell_dir, tree_sitter_haskell_lib, data_dir
 
-
-def setup_tree_sitter(file: str):
-    ext = file.split('.')[1]
-    if ext == "hs":
+def setup_tree_sitter(file: Path):
+    ext = file.suffix
+    if ext == ".hs":
         if not tree_sitter_haskell_lib.exists():
             Language.build_library(tree_sitter_haskell_lib, [tree_sitter_haskell_dir])
         HASKELL_LANGUAGE = Language(tree_sitter_haskell_lib, 'haskell')
         parser = Parser()
         parser.set_language(HASKELL_LANGUAGE)
         return parser, HASKELL_LANGUAGE
-    elif ext == "c":
+    elif ext == ".c":
         return get_parser("c"), get_language("c")
+    else:
+        raise ValueError(f"Unsupported file extension: {ext}")
     
-def snake_to_camel(snake_str):
+def snake_to_camel(snake_str: str):
     """Convert snake_case to camelCase.
     Example: "hello_world" -> "helloWorld"
     Useful for converting haskell names <-> c names.
@@ -26,7 +28,7 @@ def snake_to_camel(snake_str):
     components = snake_str.split('_')
     return components[0] + ''.join(x.title() for x in components[1:])
 
-def camel_to_snake(camel_str):
+def camel_to_snake(camel_str: str):
     """Convert camelCase to snake_case.
     Example: "helloWorld" -> "hello_world"
     Useful for converting haskell names <-> c names.
@@ -40,7 +42,7 @@ def camel_to_snake(camel_str):
             result.append(char)
     return ''.join(result)
 
-def node_size(node: Optional[Node]): return (node.end_point[0] - node.start_point[0]) if node else float("-inf")
+def node_size(node: Optional[Node]) -> int: return (node.end_point[0] - node.start_point[0]) if node else float("-inf")
     
 class EmptyNode:
     start_point: tuple[int, int]
@@ -53,58 +55,55 @@ class EmptyNode:
         self.end_point = end_point
 
 # NOTE: should get reset between LLM calls in case of changes to the codebase
-_parse_cache = {}
+_parse_cache: dict[str, dict[str, Any]] = {}
 
 class FileContext:
     """Tree of context for a single source code file. Show nodes using the `show` methods.
     Originally forked from: https://github.com/Aider-AI/grep-ast
     """
-    def __init__(self, file: Optional[str] = None, content: Optional[str] = None):
-        self.file = file
+    def __init__(self, file: Optional[str | Path] = None, content: Optional[str] = None):
+        self.file = Path(file) if file else None
         if content: self.code = content
-        else:
-            with open(file, 'r') as f: self.code = f.read()
+        else: self.code = self.file.read_text()
         self.lines = self.code.splitlines()
-        self.parser, self.language = setup_tree_sitter(file)
-        self.tree = _parse_cache[file]["tree"] if file in _parse_cache else self.parser.parse(bytes(self.code, "utf8"))
+        self.parser, self.language = setup_tree_sitter(self.file)
+        self.tree = _parse_cache[str(self.file)]["tree"] if str(self.file) in _parse_cache else self.parser.parse(bytes(self.code, "utf8"))
         self.root_node = self.tree.root_node
         self.show_indices = set()
-        self.nodes = _parse_cache[file]["nodes"] if file in _parse_cache else [[] for _ in range(len(self.lines) + 1)]
-        self.scopes = _parse_cache[file]["scopes"] if file in _parse_cache else [set() for _ in range(len(self.lines) + 1)]
-        if not file in _parse_cache: self.walk_tree(self.root_node)
-        _parse_cache[file] = {"tree": self.tree, "nodes": self.nodes, "scopes": self.scopes}
+        self.nodes = _parse_cache[str(self.file)]["nodes"] if str(self.file) in _parse_cache else [[] for _ in range(len(self.lines) + 1)]
+        self.scopes = _parse_cache[str(self.file)]["scopes"] if str(self.file) in _parse_cache else [set() for _ in range(len(self.lines) + 1)]
+        if not str(self.file) in _parse_cache: self.walk_tree(self.root_node)
+        _parse_cache[str(self.file)] = {"tree": self.tree, "nodes": self.nodes, "scopes": self.scopes}
 
     def shallow_copy(self):
-        return FileContext(file=self.file, tree=self.tree)
+        new_ctx = FileContext(file=self.file)
+        new_ctx.show_indices = set(self.show_indices)
+        return new_ctx
 
     def show_lines_mentioning(
         self,
-        name: str,
+        pattern: re.Pattern,
         scope: Literal["full", "line", "partial"] = "line",
         parents: Literal["none", "all"] = "none",
         padding: int = 0
     ):
         line_matches = []
         for i, line in enumerate(self.lines):
-            if name in line or camel_to_snake(name) in line or snake_to_camel(name) in line:
+            if pattern.search(line):
                 # some extra context
                 self.show(lines=list(range(max(0, i + 1 - padding), min(len(self.lines), i + padding + 2))), scope="line", last_line=False, parents=parents)
                 line_matches.append(i + 1)
         self.show(lines=line_matches, scope=scope, last_line=False, parents=parents)
         return self
     
-    def types_query(self):
-        if self.language.name == "haskell":
-            return "(data_type name: (name) @type.definition) @type.body"
-        elif self.language.name == "c":
-            return"""
-(type_definition declarator: (type_identifier) @name) @definition.type
-(declaration type: (union_specifier name: (type_identifier) @name)) @definition.class
-(struct_specifier name: (type_identifier) @name body:(_)) @definition.class
-(enum_specifier name: (type_identifier) @name) @definition.type
-"""
-        else: raise ValueError(f"Unsupported language: {self.language.name}")
-
+    def variables_query(self, names: list[str], include_body: bool = False):
+        query = f"""
+        (declarations
+            (bind name: (variable) @variable {f'(#match? @variable "{"|".join(names)}")' if names else ''}) {f'@bind.body' if include_body else ''}
+        )
+        """
+        return query
+    
     def definition_query(self, name: Optional[str] = None, include_body: bool = False):
         query_hs = f"""
 (function name: (variable) @function.definition {f'(#match? @function.definition "{name}")' if name else ''}) {f'@function.body' if include_body else ''}
@@ -123,10 +122,8 @@ class FileContext:
         else: raise ValueError(f"Unsupported language: {self.language.name}")
 
     def is_definition(self, node: Node):
-        if self.language.name == "haskell":
-            return node.type in ["function", "bind", "data_type"]
-        elif self.language.name == "c":
-            return node.type in ["function_definition", "declaration", "struct_specifier", "enum_specifier"]
+        if self.language.name == "haskell": return node.type in ["function", "bind", "data_type"]
+        elif self.language.name == "c": return node.type in ["function_definition", "declaration", "struct_specifier", "enum_specifier"]
         else: raise ValueError(f"Unsupported language: {self.language.name}")
 
     def find_all_children(self, node):
@@ -140,8 +137,9 @@ class FileContext:
         for node in self.nodes[line - 1]:
             if (node_size(node) > node_size(largest)) and (not definition or self.is_definition(node)):
                 largest = node
-        ret = largest or EmptyNode((line - 1, 0), (line - 1, 0))
-        return ret
+        if largest: return largest
+        elif len(self.nodes[line - 1]) > 0: return self.nodes[line - 1][0]
+        else: return EmptyNode((line - 1, 0), (line - 1, 0))
         
     def query(self, query_string: str):
         query = self.language.query(query_string)
@@ -171,8 +169,10 @@ class FileContext:
                 while reverse_idx > 0 and not (block := re.match(r'^(--|\/\/) BLOCK (\d+):', self.lines[reverse_idx - 1])):
                     reverse_idx -= 1
                 if block:
-                    # include all lines between the previous block number and the current line
-                    self.show_indices.update(range(reverse_idx - 1, idx + 1))
+                    # include some context around the line
+                    # and include the block number
+                    self.show_indices.add(reverse_idx - 1)
+                    self.show_indices.update(range(idx - 2, idx + 1))
 
     def show(
         self,
@@ -182,7 +182,7 @@ class FileContext:
         names: Optional[list[str]] = None,
         scope: Literal["full", "line", "partial"] = "line",
         parents: Literal["none", "all"] = "none",
-        last_line: bool = True,
+        last_line: bool = False,
     ):
         if lines:
             nodes = [self.node_for_line(line, definition = True) for line in lines]
@@ -202,18 +202,15 @@ class FileContext:
             elif scope == "line": self.show_indices.add(node.start_point[0])
             elif scope == "partial": self.show_indices.update((node.start_point[0], node.end_point[0]))
             if parents == "all":
-                while node.parent:
-                    self.show_indices.add(node.parent.start_point[0])
-                    node = node.parent
+                parent = node.parent
+                while parent and parent != self.root_node:
+                    self.show_indices.add(parent.start_point[0])
+                    parent = parent.parent
         if last_line: self.show_indices.add(len(self.lines) - 1)
         return self
     
     def show_all(self):
         return self.show(line_range=(0, -1), scope="line", parents="none")
-    
-    def show_skeleton(self, full_types: bool = False):
-        if full_types: self.show(query=self.types_query(), scope="full", parents="none")
-        return self.show(query=self.definition_query(), scope="line", parents="none")
     
     def merge(self, other: "FileContext"):
         self.show_indices.update(other.show_indices)
@@ -245,9 +242,9 @@ class FileContext:
                     else: output += "....⋮...\n"
                     dots = False
                 continue
-            spacer = "│"
+            spacer = "│" if line_number else ""
             line_output = f"{spacer}{line}"
-            if line_number: line_output = f"{i+1:4}" + line_output
+            if line_number: line_output = f"{i+1:3}" + line_output
             output += line_output + "\n"
             dots = True
         return output.rstrip()
@@ -263,11 +260,20 @@ def get_all_names():
     ctx = FileContext(data_dir / "hvm-code.hs")
     hs_nodes = ctx.query(ctx.definition_query())
     hs_names = set([node.text.decode("utf-8") for node in hs_nodes])
+    # need to add special case for variable bind bodies
+    # find any variable matching the function/type names we found
+    # unsure if there is a better way to do this
+    # not adding names because they should already be in the hs_names set
+    hs_bind_nodes = ctx.query(ctx.variables_query(hs_names, include_body=True))
+    hs_nodes = hs_nodes + hs_bind_nodes
 
     all_names = c_names.union(hs_names)
     print(f"all files found {len(all_names)} names")
     all_names = sorted(all_names)
     return all_names, hs_nodes, c_nodes
+
+def name_regex(name: str):
+    return fr"\b({name}|{camel_to_snake(name)}|{snake_to_camel(name)})\b"
 
 def create_contexts_for_name(name: str, hs_nodes: list[Node], c_nodes: list[Node], definitions_only: bool = False):
     """To create context for a particular name, we simply show every line that mentions the name.
@@ -276,85 +282,143 @@ def create_contexts_for_name(name: str, hs_nodes: list[Node], c_nodes: list[Node
     """
     hs_ctx = FileContext(data_dir / "hvm-code.hs")
     c_ctx = FileContext(data_dir / "hvm-code.c")
-
-    # show the main definition
+    # show the main definition for the name
     # avoiding re-querying through tree-sitter because it's slow if you do it 200+ times
-    name_query = "|".join([f"^{name}$", f"^{camel_to_snake(name)}$", f"^{snake_to_camel(name)}$"])
-    hs_nodes_for_name = [n.start_point[0] + 1 for n in hs_nodes if re.match(name_query, n.text.decode("utf-8"))]
-    c_nodes_for_name = [n.start_point[0] + 1 for n in c_nodes if re.match(name_query, n.text.decode("utf-8"))]
+    # this is still pretty slow and it would be glacial on a large codebase
+    # this regex matches the name while avoiding partial matches to avoid overfilling the context
+    pattern = re.compile(name_regex(name))
+    hs_nodes_for_name = [n.start_point[0] + 1 for n in hs_nodes if pattern.search(n.text.decode("utf-8"))]
+    c_nodes_for_name = [n.start_point[0] + 1 for n in c_nodes if (n.type == "identifier" or n.type == "type_identifier") and pattern.search(n.text.decode("utf-8"))]
     hs_ctx.show(lines=hs_nodes_for_name, scope="full", parents="all", last_line=False)
     c_ctx.show(lines=c_nodes_for_name, scope="full", parents="all", last_line=False)
-
     if not definitions_only:
         # show all lines mentioning the name, including some context
-        hs_ctx.show_lines_mentioning(name, scope="line")
-        c_ctx.show_lines_mentioning(name, scope="line")
-
-        # include block numbers
-        hs_ctx.show_nearby_block_nums()
-        c_ctx.show_nearby_block_nums()
+        hs_ctx.show_lines_mentioning(pattern, scope="line", parents="all")
+        c_ctx.show_lines_mentioning(pattern, scope="line", parents="all")
+    # include block numbers
+    hs_ctx.show_nearby_block_nums()
+    c_ctx.show_nearby_block_nums()
     return hs_ctx, c_ctx
 
 def format_contexts(hs_ctx: FileContext, c_ctx: FileContext, line_number: bool = False):
-    skeleton1 = hs_ctx.stringify(line_number=line_number)
-    skeleton2 = c_ctx.stringify(line_number=line_number)
+    if not hs_ctx and not c_ctx: return ""
+    haskell_code = hs_ctx.stringify(line_number=line_number)
+    c_code = c_ctx.stringify(line_number=line_number)
     context = ""
-    if skeleton1: context += f"./hvm.hs:\n{skeleton1}\n---------\n"
-    if skeleton2: context += f"./hvm.c:\n{skeleton2}\n---------\n"
+    if haskell_code: context += f"./{hs_ctx.file.name}:\n{haskell_code}\n---------\n"
+    if c_code: context += f"./{c_ctx.file.name}:\n{c_code}\n---------\n"
     return context.strip()
 
-def codebase_skeleton():
-    hs_ctx = FileContext(data_dir / "hvm-code.hs")
-    c_ctx = FileContext(data_dir / "hvm-code.c")
-    hs_ctx.show_skeleton(full_types=True)
-    c_ctx.show_skeleton(full_types=True)
-    return format_contexts(hs_ctx, c_ctx)
-
-# use these functions to inspect the tree created by tree-sitter
-# useful for debugging and understanding why queries are not working
-
-def print_tree(node, level=0, source_code=None):
-    """Print the tree structure with node types and text."""
-    indent = "  " * level
-    
-    # Get the text for this node if source code is provided
-    text = ""
-    if source_code:
-        start_byte = node.start_byte
-        end_byte = node.end_byte
-        text = f" -> {source_code[start_byte:end_byte]!r}"
-    
-    print(f"{indent}{node.type}{text}")
-    
-    # Recursively print children
-    for child in node.children:
-        print_tree(child, level + 1, source_code)
-
-def inspect_code(code: str, lang: Literal[".hs", ".c"]):
-    """Parse and inspect Haskell code."""
-    # Setup parser
-    parser, _ = setup_tree_sitter(lang)
-
-    # Parse code
-    tree = parser.parse(bytes(code, "utf8"))
-    
-    # Print full tree
-    print("Full Parse Tree:")
-    print_tree(tree.root_node, source_code=code)
-
 def num_mentions(name: str):
-    with open(data_dir / "hvm-code.hs", "r") as f:
-        hs_code = f.read()
-    with open(data_dir / "hvm-code.c", "r") as f:
-        c_code = f.read()
+    with open(data_dir / "hvm-code.hs", "r") as f: hs_code = f.read()
+    with open(data_dir / "hvm-code.c", "r") as f: c_code = f.read()
     return hs_code.count(name) + c_code.count(name) + hs_code.count(camel_to_snake(name)) + hs_code.count(snake_to_camel(name)) + c_code.count(camel_to_snake(name)) + c_code.count(snake_to_camel(name))
 
 def most_mentioned_names():
     all_names = get_all_names()[0]
     return sorted(all_names, key=lambda x: num_mentions(x), reverse=True)
 
+def print_tree(node, level=0, source_code=None):
+    """Print the tree structure with node types and text."""
+    indent = "  " * level
+    text = ""
+    if source_code:
+        start_byte = node.start_byte
+        end_byte = node.end_byte
+        text = f" -> {source_code[start_byte:end_byte]!r}"
+    print(f"{indent}{node.type}{text}")
+    # Recursively print children
+    for child in node.children:
+        print_tree(child, level + 1, source_code)
+
+def inspect_code(code: str, lang: Literal[".hs", ".c"]):
+    """Parse and inspect Haskell code."""
+    parser, _ = setup_tree_sitter(Path(f"x.{lang}"))
+    tree = parser.parse(bytes(code, "utf8"))
+    print("Full Parse Tree:")
+    print_tree(tree.root_node, source_code=code)
+
+def hide_block_numbers(numbers: set[int], code: str):
+    pattern = rf"(//|--)\s*BLOCK\s*({'|'.join(map(str, numbers))}):\n"
+    return re.sub(pattern, "", code)
+
+def find_block_numbers(code: str):
+    return set([int(num) for num in re.findall(r"BLOCK (\d+)", code)])
+
+def get_all_block_numbers():
+    with open(data_dir / "hvm-code.hs", "r") as f: hs_code = f.read()
+    with open(data_dir / "hvm-code.c", "r") as f: c_code = f.read()
+    return find_block_numbers(hs_code + "\n" + c_code)
+
+def get_block_code(block_number: int):
+    with open(data_dir / "hvm-code.hs", "r") as f: hs_code = f.read()
+    with open(data_dir / "hvm-code.c", "r") as f: c_code = f.read()
+    block_pattern = rf"(//|--)\s*BLOCK\s*({block_number}):\n"
+    next_block_pattern = r"(//|--)\s*BLOCK\s*(\d+):"
+    code = hs_code + "\n" + c_code
+    if match := re.search(block_pattern, code):
+        start = match.end()
+        next_block = re.search(next_block_pattern, code[start:])
+        end = start + next_block.start() if next_block else len(code)
+        return code[start:end]
+
 if __name__ == "__main__":
-    all_names, hs_nodes, c_nodes = get_all_names()
-    hs_ctx, c_ctx = create_contexts_for_name("u12v2_y", hs_nodes, c_nodes, definitions_only=True)
-    s = format_contexts(hs_ctx, c_ctx)
-    print(s)
+    # from utils import count_tokens
+    names, hs_nodes, c_nodes = get_all_names()
+    # Sort names by context length
+    # name_contexts = [(name, format_contexts(*create_contexts_for_name(name, hs_nodes, c_nodes))) for name in names]
+    # sorted_contexts = sorted(name_contexts, key=lambda x: len(x[1]), reverse=True)
+    # for name, ctx in sorted_contexts[:20]:
+    #     print(f"\n{name}:")
+    #     print(f"Context length: {len(ctx) // 4} tokens")
+    #     print("-" * 40)
+    #     # print(ctx)
+
+    # print(format_contexts(*create_contexts_for_name('parseCtr', hs_nodes, c_nodes, definitions_only=True)))
+    # print(sorted_contexts[0][1])
+    # print(sorted_contexts[0][0])
+    # print(format_contexts(*create_contexts_for_name(names[2], hs_nodes, c_nodes)))
+
+    # nodes = [node for node in hs_nodes if "term" in node.text.decode("utf-8")]
+    # print([node.text.decode("utf-8") for node in nodes])
+
+    code = """
+-- BLOCK 231:
+parseCtr :: ParserM Core
+parseCtr = do
+  consume "#"
+  nam <- parseName1
+  cid <- if length nam == 0
+    then return 0
+    else do
+      cids <- parsedCtrToCid <$> getState
+      case MS.lookup nam cids of
+        Just id -> return id
+        Nothing -> case reads nam of
+          [(num, "")] -> return (fromIntegral (num :: Integer))
+          otherwise   -> fail $ "Unknown constructor: " ++ nam
+  fds <- option [] $ do
+    try $ consume "{"
+    fds <- many $ do
+      closeWith "}"
+      parseCore
+    consume "}"
+    return fds
+  return $ Ctr cid fds
+-- BLOCK 232:
+"""
+    inspect_code(code, ".hs")
+
+
+    # file_ctx = FileContext(file="x.hs", content=code)
+    # file_ctx.show(query=file_ctx.definition_query("parseCtr"), scope="full", parents="none", last_line=False)
+    # print(file_ctx.nodes[2])
+    # print(file_ctx.stringify(line_number=True))
+    file_ctx = FileContext(file=data_dir / "hvm-code.hs")
+
+    nodes = file_ctx.query(file_ctx.variables_query(names))
+    # print(nodes)
+    
+    # for node in nodes:
+    #     print(node.text.decode("utf-8"))
+    #     print("---")

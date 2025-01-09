@@ -14,7 +14,8 @@
             "u12v2Y",
             "u12v2_y",
             "u12v2_x"
-        ]
+        ],
+        "blocks_to_edit": []
     },
     "extend the size of the addr field on runtime nodes from 32 to 40 bits, and reduce the label field from 24 to 16 bits": {
         "task": "extend the size of the addr field on runtime nodes from 32 to 40 bits, and reduce the label field from 24 to 16 bits",
@@ -36,8 +37,8 @@
             "u12v2_y",
             "u32",
             "u64"
-        ]
-
+        ],
+        "blocks_to_edit": []
     },
     "completely remove native numbers as a feature": {
         "task": "completely remove native numbers as a feature",
@@ -58,7 +59,8 @@
             "reduce_opy_w32",
             "u32",
             "u64"
-        ]
+        ],
+        "blocks_to_edit": []
     },
     "remove the list/string pretty printers": {
         "task": "remove the list/string pretty printers",
@@ -78,7 +80,8 @@
             "operToString",
             "labToString",
             "showCore"
-        ]
+        ],
+        "blocks_to_edit": []
     },
     "measure interactions by interaction type instead of just storing the total count. report results segmented by interaction type": {
         "task": "measure interactions by interaction type instead of just storing the total count. report results segmented by interaction type",
@@ -90,7 +93,8 @@
             "get_itr",
             "incItr",
             "inc_itr"
-        ]
+        ],
+        "blocks_to_edit": []
     },
     "implement a feature that prevents the user from creating two constructors with the same name. show a helpful error when that happens.": {
         "task": "implement a feature that prevents the user from creating two constructors with the same name. show a helpful error when that happens.",
@@ -105,7 +109,8 @@
             "parseName",
             "parseName1",
             "showParseError"
-        ]
+        ],
+        "blocks_to_edit": []
     },
     "clean up every commented-out line of code (\"garbage collect\" the codebase)": {
         "task": "clean up every commented-out line of code (\"garbage collect\" the codebase)",
@@ -122,7 +127,8 @@
             "compileFastCore",
             "compileFullCore",
             "reduce"
-        ]
+        ],
+        "blocks_to_edit": []
     },
     "extend Lam and App nodes to also store a label, just like Sups and Dups. the App-Lam rule must be updated so that, when the labels are different, the nodes will commute instead of beta-reducing": {
         "task": "extend Lam and App nodes to also store a label, just like Sups and Dups. the App-Lam rule must be updated so that, when the labels are different, the nodes will commute instead of beta-reducing",
@@ -143,7 +149,8 @@
             "termNew",
             "term_lab",
             "term_new"
-        ]
+        ],
+        "blocks_to_edit": []
     },
     "replace the '\u03bbx body' syntax by '\\x body'": {
         "task": "replace the '\u03bbx body' syntax by '\\x body'",
@@ -158,6 +165,7 @@
             "parseName1",
             "reduceAppLam",
             "reduce_app_lam"
-        ]
+        ],
+        "blocks_to_edit": []
     }
 }

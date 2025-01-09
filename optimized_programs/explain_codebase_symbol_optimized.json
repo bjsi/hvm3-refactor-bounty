@@ -1,0 +1,82 @@
+{
+  "module": {
+    "lm": null,
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "codebase_summary": "... omitted for brevity ...",
+        "codebase_symbol": "_SUB_",
+        "codebase_context": "... omitted for brevity ...",
+        "reasoning": "Not supplied for this particular example.",
+        "explanation": "The `_SUB_` tag in the HVM3 codebase represents a *substitution* operation, which is a fundamental mechanism in functional programming for replacing variables with their corresponding values.  This tag is used to mark terms that are placeholders for substitutions during the reduction process.  In the context of the HVM3 runtime, `_SUB_` is particularly important for handling lambda abstractions (`Lam`) and duplication (`Dup`) operations, where variables need to be substituted with their evaluated values.  For example, during the injection of a lambda term (`injectCore`), a `_SUB_` term is created as a placeholder for the variable substitution that will occur during reduction.  Similarly, in the `reduceRefAt_DupF` function, a `_SUB_` term is used to mark the position where the duplicated value will be substituted.  The `_SUB_` tag ensures that the runtime can correctly identify and perform substitutions, which is essential for maintaining the integrity of the computational graph and ensuring correct evaluation of functional programs.  This mechanism is critical for supporting the Interaction Combinator model, where substitutions are a key part of the parallel reduction process."
+      },
+      {
+        "augmented": true,
+        "codebase_summary": "... omitted for brevity ...",
+        "codebase_symbol": "_MAT_",
+        "codebase_context": "... omitted for brevity ...",
+        "reasoning": "Not supplied for this particular example.",
+        "explanation": "The `_MAT_` tag in the HVM3 codebase represents a *pattern-matching* construct, a fundamental feature in functional programming.  It is used to define a term that matches a value against a set of patterns, each associated with a specific branch of code.  The `_MAT_` tag is central to the runtime's ability to handle pattern-matching expressions, which are a key part of functional programming languages.  During compilation, `_MAT_` terms are translated into optimized C code, with specific handling for different types of patterns (e.g., numeric, constructor, or default cases).  The runtime's reduction engine (`reduceMatEra`, `reduceMatLam`, `reduceMatSup`, `reduceMatCtr`, `reduceMatW32`) handles the evaluation of `_MAT_` terms by matching the input value against the patterns and executing the corresponding branch.  The `_MAT_` tag is also used in the parsing and compilation processes to represent pattern-matching constructs in the abstract syntax tree (AST).  The `ifLetLab` function further supports the handling of `_MAT_` terms by identifying if-let matches, which are a specialized form of pattern matching.  Overall, the `_MAT_` tag is essential for enabling pattern-matching capabilities in the HVM3 system, allowing for expressive and efficient functional programming."
+      }
+    ],
+    "signature": {
+      "instructions": "Given the fields `codebase_summary`, `codebase_symbol`, `codebase_context`, produce the fields `explanation`.",
+      "fields": [
+        {
+          "prefix": "Codebase Summary:",
+          "description": "${codebase_summary}"
+        },
+        {
+          "prefix": "Codebase Symbol:",
+          "description": "${codebase_symbol}"
+        },
+        {
+          "prefix": "Codebase Context:",
+          "description": "${codebase_context}"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Explanation:",
+          "description": "A concise but detailed paragraph for a technical audience that explains the codebase symbol's role, purpose and behavior."
+        }
+      ]
+    },
+    "extended_signature": {
+      "instructions": "`codebase_summary`, `codebase_symbol`, and `codebase_context`, generate a comprehensive explanation aimed at a technical audience. This explanation should detail the role, purpose, and behavior of the specified codebase symbol within the broader context of the codebase. Ensure the explanation is clear, concise, and informative, leveraging any contextual hints to enhance understanding.",
+      "fields": [
+        {
+          "prefix": "Codebase Summary:",
+          "description": "${codebase_summary}"
+        },
+        {
+          "prefix": "Codebase Symbol:",
+          "description": "${codebase_symbol}"
+        },
+        {
+          "prefix": "Codebase Context:",
+          "description": "${codebase_context}"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Explanation:",
+          "description": "A concise but detailed paragraph for a technical audience that explains the codebase symbol's role, purpose and behavior."
+        }
+      ]
+    }
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.12.3",
+      "dspy": "2.5.43",
+      "cloudpickle": "3.1.0"
+    }
+  }
+}

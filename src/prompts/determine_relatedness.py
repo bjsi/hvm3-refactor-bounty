@@ -2,9 +2,10 @@ import asyncio
 import random
 import dspy
 import dspy.teleprompt
-from src.filesystem import data_dir, get_optimized_program_path
+from src.my_datasets import load_real_tasks, load_symbol_explanations
+from src.filesystem import get_optimized_program_path
 from src.file_context import get_all_names
-from src.utils import load_json, load_jsonl, run_dspy_parallel
+from src.utils import run_dspy_parallel
 
 class DetermineRelatedness(dspy.Signature):
     """Decide whether the codebase symbol is essential context for the task"""
@@ -14,11 +15,15 @@ class DetermineRelatedness(dspy.Signature):
     is_related: bool = dspy.OutputField()
     confidence: float = dspy.OutputField(ge=0.0, le=1.0)
 
+##########
+# Training
+##########
+
 def load_symbol_task_relatedness_trainset(shuffle=True):
     devset = []
-    context_explanations = load_jsonl(data_dir / "symbol_explanations.jsonl")
+    context_explanations = load_symbol_explanations()
     context_explanations = {row['name']: row['explanation'] for row in context_explanations}
-    for task, task_data in load_json(data_dir / "hvm3_real_tasks.json").items():
+    for task, task_data in load_real_tasks().items():
         for sym, exp in context_explanations.items():
             devset.append(
                 dspy.Example(
@@ -32,11 +37,8 @@ def load_symbol_task_relatedness_trainset(shuffle=True):
     return devset
 
 def score_response(example, pred, trace=None):
-    """Score asymmetrically to be lenient to false positives.
-    Many of them get filtered out by the confidence threshold.
-    """
     if example.is_related == pred.is_related: score = 1
-    elif not example.is_related and pred.is_related: score = 0.25
+    elif not example.is_related and pred.is_related: score = 0.25 # lenient to false positives
     else: score = 0.0
     return score
 
@@ -50,6 +52,10 @@ def optimize_for(program, devset, task_lm, prompt_lm):
 def evaluate(model, program, devset):
     with dspy.context(lm=model, cache=False):
         dspy.Evaluate(devset=devset, metric=score_response, num_threads=20, display_progress=True, display_table=True)(program)
+
+###########
+# Inference
+###########
 
 def get_related_symbols(program, model, tasks, explanations):
     symbols = get_all_names()[0]
