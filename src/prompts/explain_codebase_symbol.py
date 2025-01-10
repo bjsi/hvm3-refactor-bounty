@@ -47,7 +47,7 @@ def judge_quality(example, pred, trace=None):
 
 def optimize(devset, task_lm, prompt_lm, teacher_lm):
     program = dspy.ChainOfThoughtWithHint(ExplainCodebaseSymbol)
-    with dspy.context(lm=task_lm, cache=False):
+    with dspy.context(lm=task_lm):
         optimizer = dspy.teleprompt.MIPROv2(
             metric=judge_quality,
             auto="light",

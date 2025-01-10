@@ -44,7 +44,15 @@ def score_response(example, pred, trace=None):
 
 def optimize_for(program, devset, task_lm, prompt_lm):
     with dspy.context(lm=task_lm):
-        tp = dspy.teleprompt.MIPROv2(metric=score_response, auto="auto", prompt_model=prompt_lm, task_model=task_lm, max_bootstrapped_demos=0, max_labeled_demos=0, num_threads=20)
+        tp = dspy.teleprompt.MIPROv2(
+            metric=score_response,
+            auto="auto",
+            prompt_model=prompt_lm,
+            task_model=task_lm,
+            max_bootstrapped_demos=0,
+            max_labeled_demos=0,
+            num_threads=20
+        )
         optimized_classify = tp.compile(program, trainset=devset)
         optimized_classify.save(get_optimized_program_path(__file__))
     return optimized_classify

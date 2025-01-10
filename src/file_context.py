@@ -14,25 +14,17 @@ def setup_tree_sitter(file: Path):
         parser = Parser()
         parser.set_language(HASKELL_LANGUAGE)
         return parser, HASKELL_LANGUAGE
-    elif ext == ".c":
-        return get_parser("c"), get_language("c")
-    else:
-        raise ValueError(f"Unsupported file extension: {ext}")
+    elif ext == ".c": return get_parser("c"), get_language("c")
+    else: raise ValueError(f"Unsupported file extension: {ext}")
     
 def snake_to_camel(snake_str: str):
-    """Convert snake_case to camelCase.
-    Example: "hello_world" -> "helloWorld"
-    Useful for converting haskell names <-> c names.
-    """
+    """Convert snake_case to camelCase."""
     if not '_' in snake_str: return snake_str
     components = snake_str.split('_')
     return components[0] + ''.join(x.title() for x in components[1:])
 
 def camel_to_snake(camel_str: str):
-    """Convert camelCase to snake_case.
-    Example: "helloWorld" -> "hello_world"
-    Useful for converting haskell names <-> c names.
-    """
+    """Convert camelCase to snake_case."""
     if not any(c.isupper() for c in camel_str[1:]): return camel_str
     result = [camel_str[0].lower()]
     for char in camel_str[1:]:
@@ -96,6 +88,30 @@ class FileContext:
         self.show(lines=line_matches, scope=scope, last_line=False, parents=parents)
         return self
     
+    def show_block(self, block_number: int):
+        block_pattern = rf"(//|--)\s*BLOCK\s*({block_number}):\n"
+        next_block_pattern = r"(//|--)\s*BLOCK\s*(\d+):"
+        match = re.search(block_pattern, self.code)
+        if not match: return self
+        start_idx = self.code.count('\n', 0, match.start())
+        end_idx = start_idx
+        next_block = re.search(next_block_pattern, self.code[match.end():])
+        end_idx = (self.code.count('\n', 0, match.end() + next_block.start()) if next_block else len(self.lines)) - 1
+        return self.show(line_range=(start_idx + 1, end_idx + 1))
+
+    def show_blocks(self, block_numbers: list[int]):
+        for block_number in block_numbers: self.show_block(block_number)
+        return self
+    
+    def show_parents(self):
+        for i in list(self.show_indices):
+            node = self.node_for_line(i + 1)
+            if not node: continue
+            while node.parent and node.parent != self.root_node:
+                self.show_indices.add(node.parent.start_point[0])
+                node = node.parent
+        return self
+    
     def variables_query(self, names: list[str], include_body: bool = False):
         query = f"""
         (declarations
@@ -105,6 +121,12 @@ class FileContext:
         return query
     
     def definition_query(self, name: Optional[str] = None, include_body: bool = False):
+        # TODO: would be cool to have "regions" in addition to definitions
+        # Missing:
+        # - C constants
+        # - C includes
+        # - Haskell imports and language extensions
+
         query_hs = f"""
 (function name: (variable) @function.definition {f'(#match? @function.definition "{name}")' if name else ''}) {f'@function.body' if include_body else ''}
 (signature name: (variable) @function.definition {f'(#match? @function.definition "{name}")' if name else ''}) {f'@signature.body' if include_body else ''}
@@ -284,7 +306,7 @@ def create_contexts_for_name(name: str, hs_nodes: list[Node], c_nodes: list[Node
     c_ctx = FileContext(data_dir / "hvm-code.c")
     # show the main definition for the name
     # avoiding re-querying through tree-sitter because it's slow if you do it 200+ times
-    # this is still pretty slow and it would be glacial on a large codebase
+    # NOTE: this is still pretty slow and it would be glacial on a large codebase
     # this regex matches the name while avoiding partial matches to avoid overfilling the context
     pattern = re.compile(name_regex(name))
     hs_nodes_for_name = [n.start_point[0] + 1 for n in hs_nodes if pattern.search(n.text.decode("utf-8"))]
@@ -327,7 +349,6 @@ def print_tree(node, level=0, source_code=None):
         end_byte = node.end_byte
         text = f" -> {source_code[start_byte:end_byte]!r}"
     print(f"{indent}{node.type}{text}")
-    # Recursively print children
     for child in node.children:
         print_tree(child, level + 1, source_code)
 
@@ -361,64 +382,3 @@ def get_block_code(block_number: int):
         next_block = re.search(next_block_pattern, code[start:])
         end = start + next_block.start() if next_block else len(code)
         return code[start:end]
-
-if __name__ == "__main__":
-    # from utils import count_tokens
-    names, hs_nodes, c_nodes = get_all_names()
-    # Sort names by context length
-    # name_contexts = [(name, format_contexts(*create_contexts_for_name(name, hs_nodes, c_nodes))) for name in names]
-    # sorted_contexts = sorted(name_contexts, key=lambda x: len(x[1]), reverse=True)
-    # for name, ctx in sorted_contexts[:20]:
-    #     print(f"\n{name}:")
-    #     print(f"Context length: {len(ctx) // 4} tokens")
-    #     print("-" * 40)
-    #     # print(ctx)
-
-    # print(format_contexts(*create_contexts_for_name('parseCtr', hs_nodes, c_nodes, definitions_only=True)))
-    # print(sorted_contexts[0][1])
-    # print(sorted_contexts[0][0])
-    # print(format_contexts(*create_contexts_for_name(names[2], hs_nodes, c_nodes)))
-
-    # nodes = [node for node in hs_nodes if "term" in node.text.decode("utf-8")]
-    # print([node.text.decode("utf-8") for node in nodes])
-
-    code = """
--- BLOCK 231:
-parseCtr :: ParserM Core
-parseCtr = do
-  consume "#"
-  nam <- parseName1
-  cid <- if length nam == 0
-    then return 0
-    else do
-      cids <- parsedCtrToCid <$> getState
-      case MS.lookup nam cids of
-        Just id -> return id
-        Nothing -> case reads nam of
-          [(num, "")] -> return (fromIntegral (num :: Integer))
-          otherwise   -> fail $ "Unknown constructor: " ++ nam
-  fds <- option [] $ do
-    try $ consume "{"
-    fds <- many $ do
-      closeWith "}"
-      parseCore
-    consume "}"
-    return fds
-  return $ Ctr cid fds
--- BLOCK 232:
-"""
-    inspect_code(code, ".hs")
-
-
-    # file_ctx = FileContext(file="x.hs", content=code)
-    # file_ctx.show(query=file_ctx.definition_query("parseCtr"), scope="full", parents="none", last_line=False)
-    # print(file_ctx.nodes[2])
-    # print(file_ctx.stringify(line_number=True))
-    file_ctx = FileContext(file=data_dir / "hvm-code.hs")
-
-    nodes = file_ctx.query(file_ctx.variables_query(names))
-    # print(nodes)
-    
-    # for node in nodes:
-    #     print(node.text.decode("utf-8"))
-    #     print("---")
