@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 import re
 import sys
 from typing import Callable, Literal, Optional
@@ -85,6 +86,7 @@ def load_judged_edge_cases():
     examples = []
     for data in judge_data:
         task = real_tasks[data["task"]]
+        if not data.get("block_number"): raise ValueError(f"block_number not found for task {data['task']} {data["reasoning"]}")
         block_number = data["block_number"]
         reasoning = data["reasoning_for_modification"] if data["requires_direct_modification"] else data["reasoning_against_modification"]
         examples.append(dspy.Example({
@@ -96,7 +98,35 @@ def load_judged_edge_cases():
         }).with_inputs(*input_keys))
     return examples
 
-def load_trainset(filter_tasks: Callable[[list], bool]):
+def load_balanced_trainset():
+    # First get all judged edge cases
+    edge_cases = load_judged_edge_cases()
+    
+    # Load examples from real, polished tasks
+    real_tasks_examples = load_trainset(lambda tasks: tasks[:3])
+    
+    # Split real tasks examples into positive and negative cases
+    positive_cases = [ex for ex in real_tasks_examples if ex.requires_direct_modification]
+    negative_cases = [ex for ex in real_tasks_examples if not ex.requires_direct_modification]
+    
+    # Calculate how many examples we need from each class to balance
+    target_per_class = max(len(positive_cases), len(negative_cases))
+    
+    # Randomly sample to get balanced classes
+    if len(positive_cases) > len(negative_cases):
+        negative_cases = negative_cases * (target_per_class // len(negative_cases))
+        negative_cases.extend(negative_cases[:target_per_class - len(negative_cases)])
+    else:
+        positive_cases = positive_cases * (target_per_class // len(positive_cases)) 
+        positive_cases.extend(positive_cases[:target_per_class - len(positive_cases)])
+        
+    # Combine edge cases with balanced real task examples
+    balanced_examples = edge_cases + positive_cases + negative_cases
+    random.shuffle(balanced_examples)
+    
+    return balanced_examples
+
+def load_trainset(filter_tasks: Callable[[list], bool] = lambda _: True):
     real_tasks = load_real_tasks()
     codebase_summary = load_codebase_summary()
     sym_exps = load_symbol_explanations()
@@ -197,7 +227,7 @@ def classify_blocks(model, examples):
     if get_optimized_program_path(__file__).exists():
         print("Using optimized classify_blocks program")
         program.load(get_optimized_program_path(__file__))
-    with dspy.context(lm=model, async_max_workers=20):
+    with dspy.context(lm=model, async_max_workers=50):
         results = asyncio.run(run_dspy_parallel(program, examples))
     return results
 
@@ -212,11 +242,10 @@ def classify_blocks(model, examples):
 # 1 block, deepseek, no optimizing, with filtering, accuracy 98%, f1 80%
 # -- OPTIMIZATION v1 -- only edge cases identified w/ tiebreaker
 # 1 block, gemini, optimizing, with filtering, accuracy 96%, f1 60% - hmm pretty much the same - the instructions are overfitting
-# -- OPTIMIZATION v2 -- only edge cases identified w/ tiebreaker
+# -- OPTIMIZATION v2 -- 
 
 if __name__ == "__main__":
-    pass
-    # optimize(load_judged_edge_cases(), gemini_8b, deepseek_chat, deepseek_chat)
+    optimize(load_balanced_trainset(), gemini_8b, deepseek_chat, deepseek_chat)
     # real_tasks = load_real_tasks()
     # task = list(real_tasks.values())[0]
     # dataset = load_trainset(lambda tasks: tasks[0:1])
