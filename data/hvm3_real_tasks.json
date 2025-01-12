@@ -8252,8 +8252,8 @@
   },
   {
     "block_number": 333,
-    "reasoning": "The function `u12v2_y` is a utility function that operates on a `u64` value, which is a native number type. Given the task to remove native numbers as a feature, this function is directly tied to native number manipulation. The function performs a bitwise shift operation, which is a low-level operation on native numbers. Since the task requires the complete removal of native numbers, this function must be removed or refactored to no longer depend on `u64` or any other native number types. Therefore, the code in this block requires direct modification to align with the task's requirements.",
-    "requires_direct_modification": true,
+    "reasoning": "The function `u12v2_y` in `BLOCK 333` operates on a `u64` value, which is a 64-bit unsigned integer. While the task is to remove native numbers as a feature, `u64` is not a native number in the sense of being a high-level numeric type exposed to the user. Instead, it is a low-level data type used for memory addressing, term metadata, and other internal operations. Removing this function would not directly contribute to the task of removing native numbers as a feature, as it is part of the runtime's internal machinery rather than a user-facing feature. Therefore, this block does not require direct modification for the given task.",
+    "requires_direct_modification": false,
     "confidence": 0.9
   },
   {
@@ -8918,9 +8918,9 @@
   },
   {
     "block_number": 444,
-    "reasoning": "The `operToString` function in BLOCK 444 is a utility function that converts binary operators (e.g., `OP_ADD`, `OP_SUB`, `OP_EQ`) to their string representations. These operators are used in the `Core` language for arithmetic and comparison operations, which are typically performed on native numbers. If native numbers are being removed as a feature, the operators themselves may no longer be relevant or may need to be redefined to work with a different number representation (e.g., Church numerals or other encodings). However, the `operToString` function itself does not directly handle native numbers; it merely maps operator symbols to strings. Therefore, while the operators it maps may need to be reconsidered, the function itself does not require direct modification to remove native numbers. Instead, the operators it maps may need to be adjusted or removed elsewhere in the codebase.",
-    "requires_direct_modification": false,
-    "confidence": 0.75
+    "reasoning": "The `operToString` function maps binary operators to their string representations, and these operators are primarily used for arithmetic, comparison, and bitwise operations on native numbers. Since the task is to completely remove native numbers as a feature, the operators themselves will no longer be relevant. This means the `operToString` function will need to be modified to remove the mappings for these operators. While the function itself does not directly handle native numbers during execution, it is part of the codebase's infrastructure for representing and debugging operations. Therefore, the function must be updated to reflect the removal of native numbers by removing or redefining the operator mappings.",
+    "requires_direct_modification": true,
+    "confidence": 0.9
   },
   {
     "block_number": 445,
@@ -8929,10 +8929,10 @@
     "confidence": 0.75
   },
   {
-    "block_number": 446,
-    "reasoning": "The block in question (BLOCK 446) is labeled as \"Runtime Stringification,\" which suggests it is responsible for converting runtime values, including native numbers, into strings. Since the task is to remove native numbers as a feature, this block may need to be modified to exclude any logic related to stringifying native numbers. However, the specific content of the block is not provided, so it is unclear whether it directly handles native numbers or if it is more general-purpose stringification logic. If the block is general-purpose and does not specifically handle native numbers, it may not require direct modification. If it does contain logic for stringifying native numbers, it will need to be updated or removed.",
-    "requires_direct_modification": false,
-    "confidence": 0.5
+    "block_number": 476,
+    "reasoning": "The `showHex` function in BLOCK 476 is tightly coupled with the `Word64` type, which is a native number type. Since the task explicitly requires removing native numbers as a feature, this function must be directly modified or removed. The function itself is a utility and does not appear to be critical to the core functionality of the HVM3 runtime, but it is part of the broader native number feature set. Therefore, it must be addressed as part of the task. The function's removal or modification is necessary to ensure that no native number types remain in the codebase.",
+    "requires_direct_modification": true,
+    "confidence": 0.9
   },
   {
     "block_number": 447,
@@ -9146,9 +9146,9 @@
   },
   {
     "block_number": 482,
-    "reasoning": "The `Oper` data type in BLOCK 482 defines a set of binary operators, many of which are arithmetic (e.g., `OP_ADD`, `OP_SUB`, `OP_MUL`) and logical (e.g., `OP_EQ`, `OP_LT`, `OP_GT`). These operators are inherently tied to native numbers, as they perform operations on numeric values. To completely remove native numbers as a feature, these operators would need to be either removed or redefined to work with alternative representations (e.g., Church numerals or other non-native numeric systems). However, the block itself does not contain any logic for handling native numbers directly; it merely defines the operators. Therefore, while the operators are related to native numbers, the block itself does not require direct modification to remove native numbers. Instead, the removal would involve changes elsewhere in the codebase where these operators are used with native numbers.",
-    "requires_direct_modification": false,
-    "confidence": 0.75
+    "reasoning": "The `Oper` data type in BLOCK 482 defines binary operators that are inherently tied to numerical types, as they perform arithmetic, logical, and bitwise operations. If native numbers are to be completely removed, these operators would no longer serve a purpose, as they rely on numerical operands. Therefore, this block must be directly modified to either remove these operators entirely or replace them with alternative constructs that do not depend on native numbers. The presence of these operators in the codebase would contradict the goal of removing native numbers, making direct modification necessary.",
+    "requires_direct_modification": true,
+    "confidence": 0.9
   },
   {
     "block_number": 483,
@@ -9266,9 +9266,9 @@
   },
   {
     "block_number": 502,
-    "reasoning": "The `_OPX_` tag is directly associated with binary operations involving native numbers, as evidenced by its use in functions like `reduceOpxW32` and `reduceOpyW32`. Since the task is to remove native numbers entirely, this tag and its associated logic must be removed or repurposed. However, the block itself only defines the tag and does not contain any logic or functionality. Therefore, while the tag definition must be removed, the block itself does not require direct modification beyond deletion. The actual logic for handling native numbers resides in other parts of the codebase, such as the reduction functions mentioned earlier.",
-    "requires_direct_modification": false,
-    "confidence": 0.75
+    "reasoning": "The `_OPX_` tag is directly tied to the handling of native numbers, as it is used to identify binary operations involving numeric operands. Since the task is to remove native numbers entirely, this tag and its associated functionality must be removed. The block defines the tag itself, so it must be directly modified to either remove the definition or repurpose it for a different feature (though repurposing is not aligned with the task's goal of complete removal). Therefore, this block requires direct modification to align with the task's requirements.",
+    "requires_direct_modification": true,
+    "confidence": 0.9
   },
   {
     "block_number": 503,
