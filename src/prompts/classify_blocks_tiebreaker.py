@@ -10,10 +10,6 @@ from src.prompts.classify_blocks import classify_blocks, convert_confidence_to_n
 from src.utils import run_dspy_parallel
 from src.llms import deepseek_chat
 
-# this is messy - I didn't polish it due to time constraints
-# but the idea is great, it works and all the pieces are there to make a dataset creation loop
-# i used this to create a polished version of the hvm3_real_tasks dataset
-
 class BinaryClassificationTiebreaker(dspy.Signature):
     """You are a judge tasked with resolving a tie between two programmers' predictions about whether a code block requires direct modification.  You will be given the problem context, the two programmers' reasoning, and their predictions.  You will then need to determine which prediction is correct, and provide your reasoning for doing so."""
     # problem context
@@ -33,6 +29,17 @@ class BinaryClassificationTiebreaker(dspy.Signature):
     confidence: Literal["low", "medium", "high", "very high"] = dspy.OutputField(desc="Your confidence that code in the block must be directly modified")
 
 def tiebreak(model, disagreements: list[tuple[dspy.Example, dspy.Prediction]]):
+    input_keys = [
+        "codebase_summary",
+        "codebase_symbol_explanations",
+        "task",
+        "specific_context",
+        "task_reflection",
+        "programmer_1_reasoning",
+        "programmer_1_requires_direct_modification",
+        "programmer_2_reasoning",
+        "programmer_2_requires_direct_modification"
+    ]
     examples = [dspy.Example(
         codebase_summary=example.codebase_summary,
         codebase_symbol_explanations=example.codebase_symbol_explanations,
@@ -45,7 +52,7 @@ def tiebreak(model, disagreements: list[tuple[dspy.Example, dspy.Prediction]]):
         # prediction
         programmer_2_reasoning=prediction.reasoning,
         programmer_2_requires_direct_modification=prediction.requires_direct_modification,
-    ).with_inputs("codebase_summary", "codebase_symbol_explanations", "task", "specific_context", "task_reflection", "programmer_1_reasoning", "programmer_1_requires_direct_modification", "programmer_2_reasoning", "programmer_2_requires_direct_modification") for (example, prediction) in disagreements]
+    ).with_inputs(*input_keys) for (example, prediction) in disagreements]
     program = dspy.Predict(BinaryClassificationTiebreaker)
     # load the optimized judge if it exists
     if get_optimized_program_path(__file__).exists():
@@ -80,7 +87,7 @@ def optimize_judge(model):
             prompt_model=model,
             task_model=model,
             max_bootstrapped_demos=1,
-            # in each optimization step, allow up to 2 new labeled demos
+            # in each new optimization run, allow up to 2 new labeled demos
             max_labeled_demos=len(program.demos) + 2,
             num_threads=6,
         )
@@ -88,6 +95,7 @@ def optimize_judge(model):
         optimized_program.save(get_optimized_program_path(__file__))
 
 # basic cli for human in the loop data collection
+# it will prompt you to review challenging cases
 def review_case(incumbent, challenger, judgement):
     print("\033[H\033[J", end="")  # Clear console using ANSI escape codes
     print("\nTask:")
@@ -120,77 +128,89 @@ def review_case(incumbent, challenger, judgement):
         elif agree == 's':
             return None
 
+# if no data:
+    # new_incumbent_data = []
+    # for (incumbent_prediction, challenger_prediction) in zip(incumbent_dataset, challenger_dataset):
+    #     new_incumbent_data.append(
+    #         {
+    #             "block_number": incumbent_prediction.block_number,
+    #             "reasoning": challenger_prediction.reasoning,
+    #             "requires_direct_modification": challenger_prediction.requires_direct_modification,
+    #             "confidence": convert_confidence_to_num(challenger_prediction.confidence)
+    #         })
+    # save_new_incumbent_data(new_incumbent_data)
+
 if __name__ == "__main__":
-    # optimize_judge(deepseek_chat)
-    incumbent_dataset = load_trainset(lambda tasks: tasks[0:1])
+    optimize_judge(deepseek_chat)
+    # incumbent_dataset = load_trainset(lambda tasks: tasks[2:3])
     # deepseek_chat.cache = False
-    challenger_dataset = classify_blocks(deepseek_chat, incumbent_dataset)
-    ties = [
-        (incumbent_prediction, challenger_prediction)
-        for incumbent_prediction, challenger_prediction in zip(incumbent_dataset, challenger_dataset)
-        if incumbent_prediction.requires_direct_modification != challenger_prediction.requires_direct_modification
-    ]
-    print(f"Number of ties: {len(ties)}")
-    print("Tiebreaking...")
-    judgements = tiebreak(deepseek_chat, ties)
-    scores = []
-    losses = []
-    not_confident = []
-    for (incumbent_prediction, challenger_prediction), judgement in zip(ties, judgements):
-        print(f"Incumbent: {incumbent_prediction.reasoning}\n")
-        print(f"Challenger: {challenger_prediction.reasoning}\n")
-        print(f"Judge for: {judgement.reasoning_for_modification} against: {judgement.reasoning_against_modification}")
-        if convert_confidence_to_num(judgement.confidence) >= 0.75:
-            if judgement.requires_direct_modification == incumbent_prediction.requires_direct_modification:
-                scores.append(1)
-                print("Incumbent wins")
-            else:
-                scores.append(0)
-                print("Challenger wins")
-                losses.append((incumbent_prediction, challenger_prediction, judgement))
-        else:
-            print("Judge is not confident")
-            not_confident.append((incumbent_prediction, challenger_prediction, judgement))
-    print(f"Incumbent win rate: {sum(scores) / len(scores)}")
-    print(f"Judge not confident: {len([s for s in scores if s == 0])}")
+    # challenger_dataset = classify_blocks(deepseek_chat, incumbent_dataset)
+    # ties = [
+    #     (incumbent_prediction, challenger_prediction)
+    #     for incumbent_prediction, challenger_prediction in zip(incumbent_dataset, challenger_dataset)
+    #     if incumbent_prediction.requires_direct_modification != challenger_prediction.requires_direct_modification
+    # ]
+    # print(f"Number of ties: {len(ties)}")
+    # print("Tiebreaking...")
+    # judgements = tiebreak(deepseek_chat, ties)
+    # scores = []
+    # losses = []
+    # not_confident = []
+    # for (incumbent_prediction, challenger_prediction), judgement in zip(ties, judgements):
+    #     print(f"Incumbent: {incumbent_prediction.reasoning}\n")
+    #     print(f"Challenger: {challenger_prediction.reasoning}\n")
+    #     print(f"Judge for: {judgement.reasoning_for_modification} against: {judgement.reasoning_against_modification}")
+    #     if convert_confidence_to_num(judgement.confidence) >= 0.75:
+    #         if judgement.requires_direct_modification == incumbent_prediction.requires_direct_modification:
+    #             scores.append(1)
+    #             print("Incumbent wins")
+    #         else:
+    #             scores.append(0)
+    #             print("Challenger wins")
+    #             losses.append((incumbent_prediction, challenger_prediction, judgement))
+    #     else:
+    #         print("Judge is not confident")
+    #         not_confident.append((incumbent_prediction, challenger_prediction, judgement))
+    # print(f"Incumbent win rate: {sum(scores) / len(scores)}")
+    # print(f"Judge not confident: {len([s for s in scores if s == 0])}")
 
-    cases_to_review = losses + not_confident
-    print(f"Number of cases to review: {len(cases_to_review)}")
-    time.sleep(5)
-    # sys.exit()
-    new_incumbent_data = []
-    new_judge_data = []
-    for i, (incumbent_prediction, challenger_prediction, judgement) in list(enumerate(cases_to_review)):
-        review = review_case(incumbent_prediction, challenger_prediction, judgement)
-        if review is None: continue
-        judge_data = {
-            "codebase_summary": incumbent_prediction.codebase_summary,
-            "codebase_symbol_explanations": incumbent_prediction.codebase_symbol_explanations,
-            "task": incumbent_prediction.task,
-            "specific_context": incumbent_prediction.specific_context,
-            "task_reflection": incumbent_prediction.task_reflection,
-            "programmer_1_reasoning": incumbent_prediction.reasoning,
-            "programmer_1_requires_direct_modification": incumbent_prediction.requires_direct_modification,
-            "programmer_2_reasoning": challenger_prediction.reasoning,
-            "programmer_2_requires_direct_modification": challenger_prediction.requires_direct_modification,
-            "reasoning_for_modification": judgement.reasoning_for_modification,
-            "reasoning_against_modification": judgement.reasoning_against_modification,
-            "requires_direct_modification": review.requires_direct_modification,
-            "confidence": "very high" # because we've reviewed it
-        }
-        new_judge_data.append(judge_data)
-        # TODO: should prob account for confidence
-        if review.requires_direct_modification != incumbent_prediction.requires_direct_modification:
-            new_incumbent_data.append(
-                {
-                    "block_number": incumbent_prediction.block_number,
-                    "reasoning": review.reasoning,
-                    "requires_direct_modification": review.requires_direct_modification,
-                    "confidence": review.confidence,
-            })
+    # cases_to_review = losses + not_confident
+    # print(f"Number of cases to review: {len(cases_to_review)}")
+    # time.sleep(5)
+    # # sys.exit()
+    # new_incumbent_data = []
+    # new_judge_data = []
+    # for i, (incumbent_prediction, challenger_prediction, judgement) in list(enumerate(cases_to_review)):
+    #     review = review_case(incumbent_prediction, challenger_prediction, judgement)
+    #     if review is None: continue
+    #     judge_data = {
+    #         "codebase_summary": incumbent_prediction.codebase_summary,
+    #         "codebase_symbol_explanations": incumbent_prediction.codebase_symbol_explanations,
+    #         "task": incumbent_prediction.task,
+    #         "specific_context": incumbent_prediction.specific_context,
+    #         "task_reflection": incumbent_prediction.task_reflection,
+    #         "programmer_1_reasoning": incumbent_prediction.reasoning,
+    #         "programmer_1_requires_direct_modification": incumbent_prediction.requires_direct_modification,
+    #         "programmer_2_reasoning": challenger_prediction.reasoning,
+    #         "programmer_2_requires_direct_modification": challenger_prediction.requires_direct_modification,
+    #         "reasoning_for_modification": judgement.reasoning_for_modification,
+    #         "reasoning_against_modification": judgement.reasoning_against_modification,
+    #         "requires_direct_modification": review.requires_direct_modification,
+    #         "confidence": "very high" # because we've reviewed it
+    #     }
+    #     new_judge_data.append(judge_data)
+    #     # TODO: should prob account for confidence
+    #     if review.requires_direct_modification != incumbent_prediction.requires_direct_modification:
+    #         new_incumbent_data.append(
+    #             {
+    #                 "block_number": incumbent_prediction.block_number,
+    #                 "reasoning": review.reasoning,
+    #                 "requires_direct_modification": review.requires_direct_modification,
+    #                 "confidence": review.confidence,
+    #         })
 
-    save_new_incumbent_data(new_incumbent_data)
-    existing_judge_data = load_binary_classification_judge_data()
-    updated_judge_data = existing_judge_data + new_judge_data
-    save_binary_classification_judge_data(updated_judge_data)
+    # save_new_incumbent_data(new_incumbent_data)
+    # existing_judge_data = load_binary_classification_judge_data()
+    # updated_judge_data = existing_judge_data + new_judge_data
+    # save_binary_classification_judge_data(updated_judge_data)
         

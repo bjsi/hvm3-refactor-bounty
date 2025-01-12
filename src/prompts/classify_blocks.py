@@ -128,7 +128,7 @@ def load_trainset(filter_tasks: Callable[[list], bool]):
                     specific_context=task_specific_context,
                     task=task["task"],
                     block_number=block,
-                    task_reflection=task["task_reflection"],
+                    task_reflection=task.get("task_reflection", None),
                     reasoning=block_info.get("reasoning", None) if block_info else None,
                     requires_direct_modification=block_info.get("requires_direct_modification", False) if block_info else False,
                     confidence=block_info.get("confidence", "low") if block_info else "low",
@@ -215,6 +215,7 @@ def classify_blocks(model, examples):
 # -- OPTIMIZATION v2 -- only edge cases identified w/ tiebreaker
 
 if __name__ == "__main__":
+    pass
     # optimize(load_judged_edge_cases(), gemini_8b, deepseek_chat, deepseek_chat)
     # real_tasks = load_real_tasks()
     # task = list(real_tasks.values())[0]
