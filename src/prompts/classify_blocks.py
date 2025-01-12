@@ -75,16 +75,24 @@ def load_judged_edge_cases():
         "task",
         "block_number",
     ]
+    output_keys = [
+        "task_reflection",
+        "reasoning",
+        "requires_direct_modification",
+        "confidence",
+    ]
+    all_keys = set(input_keys + output_keys)
     examples = []
     for data in judge_data:
         task = real_tasks[data["task"]]
         block_number = data["block_number"]
-        block_info = next((b for b in task["blocks_to_edit"] if b["block_number"] == block_number), None)
+        reasoning = data["reasoning_for_modification"] if data["requires_direct_modification"] else data["reasoning_against_modification"]
         examples.append(dspy.Example({
-            **data,
+            **{k: data[k] for k in all_keys if k in data},
             "block_number": block_number,
             "codebase_summary": codebase_summary,
             "codebase_symbol_explanations": "\n".join([f"{name}: {sym_exps[name]}" for name in task["related_symbols"]]),
+            "reasoning": reasoning
         }).with_inputs(*input_keys))
     return examples
 
@@ -159,6 +167,9 @@ def f1_score(predicted_blocks_to_edit, actual_blocks_to_edit):
 
 def optimize(devset, task_lm, prompt_lm, teacher_lm):
     program = dspy.Predict(ClassifyBlock)
+    if get_optimized_program_path(__file__).exists():
+        print("Using optimized classify_blocks program")
+        program.load(get_optimized_program_path(__file__))
     with dspy.context(lm=task_lm):
         optimizer = dspy.teleprompt.MIPROv2(
             metric=direct_score,
@@ -166,13 +177,13 @@ def optimize(devset, task_lm, prompt_lm, teacher_lm):
             prompt_model=prompt_lm,
             task_model=task_lm,
             max_bootstrapped_demos=1,
-            max_labeled_demos=6,
+            max_labeled_demos=len(program.demos) + 2,
             num_threads=6,
             hide_demo_fields=[
                 "codebase_summary",
                 "codebase_symbol_explanations",
             ],
-            teacher_settings=dict(lm=teacher_lm),
+            # teacher_settings=dict(lm=teacher_lm),
         )
         optimized_program = optimizer.compile(program, trainset=devset)
         optimized_program.save(get_optimized_program_path(__file__))
@@ -185,8 +196,8 @@ def classify_blocks(model, examples):
     program = dspy.Predict(ClassifyBlock)
     if get_optimized_program_path(__file__).exists():
         print("Using optimized classify_blocks program")
-        program = dspy.Predict.load(get_optimized_program_path(__file__))
-    with dspy.context(lm=model, async_max_workers=40):
+        program.load(get_optimized_program_path(__file__))
+    with dspy.context(lm=model, async_max_workers=20):
         results = asyncio.run(run_dspy_parallel(program, examples))
     return results
 
@@ -200,32 +211,34 @@ def classify_blocks(model, examples):
 # 1 block, gemini, no optimizing, with filtering, accuracy 96%, f1 61%
 # 1 block, deepseek, no optimizing, with filtering, accuracy 98%, f1 80%
 # -- OPTIMIZATION v1 -- only edge cases identified w/ tiebreaker
-# 
+# 1 block, gemini, optimizing, with filtering, accuracy 96%, f1 60% - hmm pretty much the same - the instructions are overfitting
+# -- OPTIMIZATION v2 -- only edge cases identified w/ tiebreaker
 
 if __name__ == "__main__":
-    real_tasks = load_real_tasks()
-    task = list(real_tasks.values())[0]
-    dataset = load_trainset(lambda tasks: tasks[0:1])
-    results = classify_blocks(gemini_8b, dataset)
-    scores = []
-    wrong_reasons = []
-    for (result, datapoint) in list(zip(results, dataset)):
-        score = direct_score(datapoint, result)
-        scores.append(score)
-        if score == 0:
-            reason = "wrong" if result.requires_direct_modification != datapoint.requires_direct_modification else "low confidence"
-            if reason == "low confidence": continue
-            print(f"block {datapoint.block_number}")
-            print(f"code: {get_block_code(datapoint.block_number)}")
-            print(f"reasoning: {result.reasoning}")
-            print(f"prediction: {result.requires_direct_modification}")
-            print(f"confidence: {result.confidence}")
-            print(f"score: {score}")
-            wrong_reasons.append(reason)
-            print(f"reason for fail {reason}")
-            print('---')
+    # optimize(load_judged_edge_cases(), gemini_8b, deepseek_chat, deepseek_chat)
+    # real_tasks = load_real_tasks()
+    # task = list(real_tasks.values())[0]
+    # dataset = load_trainset(lambda tasks: tasks[0:1])
+    # results = classify_blocks(gemini_8b, dataset)
+    # scores = []
+    # wrong_reasons = []
+    # for (result, datapoint) in list(zip(results, dataset)):
+    #     score = direct_score(datapoint, result)
+    #     scores.append(score)
+    #     if score == 0:
+    #         reason = "wrong" if result.requires_direct_modification != datapoint.requires_direct_modification else "low confidence"
+    #         if reason == "low confidence": continue
+    #         print(f"block {datapoint.block_number}")
+    #         print(f"code: {get_block_code(datapoint.block_number)}")
+    #         print(f"reasoning: {result.reasoning}")
+    #         print(f"prediction: {result.requires_direct_modification}")
+    #         print(f"confidence: {result.confidence}")
+    #         print(f"score: {score}")
+    #         wrong_reasons.append(reason)
+    #         print(f"reason for fail {reason}")
+    #         print('---')
 
-    expected_blocks_to_edit = set([example.block_number for example in dataset if example.requires_direct_modification and convert_confidence_to_num(example.confidence) >= 0.75])
-    actual_blocks_to_edit = set([example.block_number for example, result in zip(dataset, results) if result.requires_direct_modification and convert_confidence_to_num(result.confidence) >= 0.75])
-    print(f"f1 score: {f1_score(expected_blocks_to_edit, actual_blocks_to_edit)}")
-    print(f"accuracy: {sum(scores) / len(scores)}")
+    # expected_blocks_to_edit = set([example.block_number for example in dataset if example.requires_direct_modification and convert_confidence_to_num(example.confidence) >= 0.75])
+    # actual_blocks_to_edit = set([example.block_number for example, result in zip(dataset, results) if result.requires_direct_modification and convert_confidence_to_num(result.confidence) >= 0.75])
+    # print(f"f1 score: {f1_score(expected_blocks_to_edit, actual_blocks_to_edit)}")
+    # print(f"accuracy: {sum(scores) / len(scores)}")
