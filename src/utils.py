@@ -11,7 +11,6 @@ def count_tokens(text: str) -> int:
 
 async def run_parallel_tasks_with_progress(tasks: list[Callable], desc: str = "Tasks") -> list[Any]:
     time_start = time.time()
-    
     async def wrapped_task(task: Callable, index: int, pbar: tqdm) -> tuple[int, Any]:
         try:
             result = await task()
@@ -45,7 +44,7 @@ def load_json(path: str):
     with open(path, "r") as f: return json.load(f)
 
 def save_json(data: dict, path: str):
-    with open(path, "w") as f: json.dump(data, f)
+    with open(path, "w") as f: json.dump(data, f, indent=2)
 
 def load_text(path: str):
     with open(path, "r") as f: return f.read()

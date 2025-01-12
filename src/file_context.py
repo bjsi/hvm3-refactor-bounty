@@ -170,11 +170,7 @@ class FileContext:
         return nodes
     
     def show_nearby_block_nums(self):
-        """Required to show the block numbers Victor added to the codebase.
-        Note that I think the task is doable without this simply by outputting code symbols with their full scopes.
-        But this helps satisfy the competition requirements.
-        This conveniently also shows the comments above important code blocks.
-        """
+        """To show the block numbers Victor added to the codebase."""
         prev_idx = None
         non_consecutive_idxs = []
         for idx in sorted(self.show_indices):

@@ -37,7 +37,8 @@ def get_lm(model: str):
         model=model,
         api_key=provider_to_api_key[model_to_provider[model]],
         api_base=provider_to_base_url[model_to_provider[model]],
-        max_tokens=1000
+        max_tokens=1000,
+        # cache=False,
     )
     return lm
 
