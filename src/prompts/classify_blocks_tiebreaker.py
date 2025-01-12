@@ -5,14 +5,14 @@ import dspy
 from typing import Literal
 import dspy.teleprompt
 from src.filesystem import get_optimized_program_path
-from src.my_datasets import load_binary_classification_judge_data, save_binary_classification_judge_data
+from src.my_datasets import load_binary_classification_judge_data, save_binary_classification_judge_data, save_new_incumbent_data
 from src.prompts.classify_blocks import classify_blocks, convert_confidence_to_num, load_trainset
-from src.utils import run_dspy_parallel, save_json
+from src.utils import run_dspy_parallel
 from src.llms import deepseek_chat
 
-########################
-# Tiebreaker to resolve clashing predictions between datasets
-########################
+# this is messy - I didn't polish it due to time constraints
+# but the idea is great, it works and all the pieces are there to make a dataset creation loop
+# i used this to create a polished version of the hvm3_real_tasks dataset
 
 class BinaryClassificationTiebreaker(dspy.Signature):
     """You are a judge tasked with resolving a tie between two programmers' predictions about whether a code block requires direct modification.  You will be given the problem context, the two programmers' reasoning, and their predictions.  You will then need to determine which prediction is correct, and provide your reasoning for doing so."""
@@ -164,6 +164,8 @@ if __name__ == "__main__":
         review = review_case(incumbent_prediction, challenger_prediction, judgement)
         if review is None: continue
         judge_data = {
+            "codebase_summary": incumbent_prediction.codebase_summary,
+            "codebase_symbol_explanations": incumbent_prediction.codebase_symbol_explanations,
             "task": incumbent_prediction.task,
             "specific_context": incumbent_prediction.specific_context,
             "task_reflection": incumbent_prediction.task_reflection,
@@ -187,7 +189,7 @@ if __name__ == "__main__":
                     "confidence": review.confidence,
             })
 
-    save_json(new_incumbent_data, 'new_incumbent_data.json')
+    save_new_incumbent_data(new_incumbent_data)
     existing_judge_data = load_binary_classification_judge_data()
     updated_judge_data = existing_judge_data + new_judge_data
     save_binary_classification_judge_data(updated_judge_data)

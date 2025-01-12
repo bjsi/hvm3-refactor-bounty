@@ -6,7 +6,7 @@ from typing import Callable, Literal, Optional
 import dspy
 import dspy.teleprompt
 from pydantic import BaseModel
-from src.my_datasets import load_codebase_summary, load_real_tasks, load_symbol_explanations
+from src.my_datasets import load_binary_classification_judge_data, load_codebase_summary, load_real_tasks, load_symbol_explanations
 from src.file_context import FileContext, get_all_block_numbers, find_block_numbers, format_contexts, get_all_names, get_block_code, hide_block_numbers
 from src.filesystem import data_dir, get_optimized_program_path
 from src.utils import run_dspy_parallel
@@ -60,6 +60,33 @@ def format_block_context(hs_ctx, c_ctx):
     end_block_line = f"{match} BLOCK END"
     lines = lines[:-2] + [end_block_line] + lines[-2:]
     return "\n".join(lines)
+
+# take the hardest cases from the judge data to use for training
+def load_judged_edge_cases():
+    codebase_summary = load_codebase_summary()
+    real_tasks = load_real_tasks()
+    sym_exps = load_symbol_explanations()
+    sym_exps = {exp["name"]: exp["explanation"] for exp in sym_exps}
+    judge_data = load_binary_classification_judge_data()
+    input_keys = [
+        "codebase_summary",
+        "codebase_symbol_explanations",
+        "specific_context",
+        "task",
+        "block_number",
+    ]
+    examples = []
+    for data in judge_data:
+        task = real_tasks[data["task"]]
+        block_number = data["block_number"]
+        block_info = next((b for b in task["blocks_to_edit"] if b["block_number"] == block_number), None)
+        examples.append(dspy.Example({
+            **data,
+            "block_number": block_number,
+            "codebase_summary": codebase_summary,
+            "codebase_symbol_explanations": "\n".join([f"{name}: {sym_exps[name]}" for name in task["related_symbols"]]),
+        }).with_inputs(*input_keys))
+    return examples
 
 def load_trainset(filter_tasks: Callable[[list], bool]):
     real_tasks = load_real_tasks()
@@ -156,6 +183,9 @@ def optimize(devset, task_lm, prompt_lm, teacher_lm):
 
 def classify_blocks(model, examples):
     program = dspy.Predict(ClassifyBlock)
+    if get_optimized_program_path(__file__).exists():
+        print("Using optimized classify_blocks program")
+        program = dspy.Predict.load(get_optimized_program_path(__file__))
     with dspy.context(lm=model, async_max_workers=40):
         results = asyncio.run(run_dspy_parallel(program, examples))
     return results
@@ -166,56 +196,27 @@ def classify_blocks(model, examples):
 # -- CLEANED DATA --
 # 1 block, gemini, no optimizing, with filtering, accuracy 95%, f1 65%
 # 1 block, deepseek, no optimizing, with filtering, accuracy 96%, f1 75%
+# -- CLEANED DATA WITH TIEBREAKER --
+# 1 block, gemini, no optimizing, with filtering, accuracy 96%, f1 61%
+# 1 block, deepseek, no optimizing, with filtering, accuracy 98%, f1 80%
+# -- OPTIMIZATION v1 -- only edge cases identified w/ tiebreaker
+# 
 
 if __name__ == "__main__":
     real_tasks = load_real_tasks()
     task = list(real_tasks.values())[0]
-
-    ## single
-    examples = load_trainset(lambda tasks: tasks[0:2])
-    sys.exit()
-
-    results1 = classify_blocks(deepseek_chat, examples)
+    dataset = load_trainset(lambda tasks: tasks[0:1])
+    results = classify_blocks(gemini_8b, dataset)
     scores = []
     wrong_reasons = []
-
-    # json_fds = []
-    # for (result, example) in list(zip(results1, examples)):
-    #     json_fds.append({
-    #         "block_number": example.block_number,
-    #         "reasoning": result.reasoning,
-    #         "requires_direct_modification": result.requires_direct_modification,
-    #         "confidence": convert_confidence_to_num(result.confidence),
-    #     })
-    # with open("json_fds.json", "w") as f:
-    #     json.dump(json_fds, f, indent=2)
-
-    not_in_task1 = []
-    for (result, example) in list(zip(results1, examples)):
-        score = direct_score(example, result)
+    for (result, datapoint) in list(zip(results, dataset)):
+        score = direct_score(datapoint, result)
         scores.append(score)
-
-        # if example.block_number not in task_blocks_to_edit_set and score == 1:
-        #     print(f"block {example.block_number}")
-        #     print(f"code: {get_block_code(example.block_number)}")
-        #     print(f"reasoning: {result.reasoning}")
-        #     # print(f"task reflection: {result.task_reflection}")
-        #     print(f"prediction: {result.requires_direct_modification}")
-        #     print(f"confidence: {result.confidence}")
-        #     print(f"score: {score}")
-        #     print('---')
-        #     not_in_task1.append({
-        #         "block_number": example.block_number,
-        #         "reasoning": result.reasoning,
-        #         "requires_direct_modification": result.requires_direct_modification,
-        #         "confidence": convert_confidence_to_num(result.confidence),
-        #     })
-
         if score == 0:
-            reason = "wrong" if result.requires_direct_modification != example.requires_direct_modification else "low confidence"
+            reason = "wrong" if result.requires_direct_modification != datapoint.requires_direct_modification else "low confidence"
             if reason == "low confidence": continue
-            print(f"block {example.block_number}")
-            print(f"code: {get_block_code(example.block_number)}")
+            print(f"block {datapoint.block_number}")
+            print(f"code: {get_block_code(datapoint.block_number)}")
             print(f"reasoning: {result.reasoning}")
             print(f"prediction: {result.requires_direct_modification}")
             print(f"confidence: {result.confidence}")
@@ -224,8 +225,7 @@ if __name__ == "__main__":
             print(f"reason for fail {reason}")
             print('---')
 
-    expected_blocks_to_edit = set([example.block_number for example in examples if example.requires_direct_modification and convert_confidence_to_num(example.confidence) >= 0.75])
-    actual_blocks_to_edit = set([example.block_number for example, result in zip(examples, results1) if result.requires_direct_modification and convert_confidence_to_num(result.confidence) >= 0.75])
+    expected_blocks_to_edit = set([example.block_number for example in dataset if example.requires_direct_modification and convert_confidence_to_num(example.confidence) >= 0.75])
+    actual_blocks_to_edit = set([example.block_number for example, result in zip(dataset, results) if result.requires_direct_modification and convert_confidence_to_num(result.confidence) >= 0.75])
     print(f"f1 score: {f1_score(expected_blocks_to_edit, actual_blocks_to_edit)}")
     print(f"accuracy: {sum(scores) / len(scores)}")
-    # print(f"wrong reasons: {wrong_reasons}")
