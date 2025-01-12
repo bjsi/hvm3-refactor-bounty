@@ -1,0 +1,62 @@
+{
+  "lm": null,
+  "traces": [],
+  "train": [],
+  "demos": [],
+  "signature": {
+    "instructions": "You are a judge tasked with resolving a tie between two programmers' predictions about whether a code block requires direct modification.  You will be given the problem context, the two programmers' reasoning, and their predictions.  You will then need to determine which prediction is correct, and provide your reasoning for doing so.",
+    "fields": [
+      {
+        "prefix": "Task:",
+        "description": "${task}"
+      },
+      {
+        "prefix": "Task Reflection:",
+        "description": "${task_reflection}"
+      },
+      {
+        "prefix": "Specific Context:",
+        "description": "${specific_context}"
+      },
+      {
+        "prefix": "Programmer 1 Reasoning:",
+        "description": "${programmer_1_reasoning}"
+      },
+      {
+        "prefix": "Programmer 1 Requires Direct Modification:",
+        "description": "${programmer_1_requires_direct_modification}"
+      },
+      {
+        "prefix": "Programmer 2 Reasoning:",
+        "description": "${programmer_2_reasoning}"
+      },
+      {
+        "prefix": "Programmer 2 Requires Direct Modification:",
+        "description": "${programmer_2_requires_direct_modification}"
+      },
+      {
+        "prefix": "Reasoning For Modification:",
+        "description": "${reasoning_for_modification}"
+      },
+      {
+        "prefix": "Reasoning Against Modification:",
+        "description": "${reasoning_against_modification}"
+      },
+      {
+        "prefix": "Requires Direct Modification:",
+        "description": "${requires_direct_modification}"
+      },
+      {
+        "prefix": "Confidence:",
+        "description": "Your confidence that code in the block must be directly modified"
+      }
+    ]
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.12.3",
+      "dspy": "2.5.43",
+      "cloudpickle": "3.1.0"
+    }
+  }
+}
