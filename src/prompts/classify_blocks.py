@@ -252,7 +252,7 @@ if __name__ == "__main__":
     # optimize(load_balanced_trainset(), gemini_8b, deepseek_chat, deepseek_chat, gpt_4o)
     real_tasks = load_real_tasks()
     task = list(real_tasks.values())[0]
-    dataset = load_trainset(lambda tasks: tasks[2:3])[:3]
+    dataset = load_trainset(lambda tasks: tasks[2:3])
     results = classify_blocks(deepseek_chat, dataset)
     print(results[0].task_reflection)
     scores = []
