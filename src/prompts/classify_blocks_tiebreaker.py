@@ -148,7 +148,8 @@ def review_case(incumbent, challenger, judgement):
 
 if __name__ == "__main__":
     # optimize_judge(deepseek_chat)
-    incumbent_dataset = load_trainset(lambda tasks: tasks[2:3])
+    incumbent_dataset = load_trainset(lambda tasks: tasks[4:5])
+    deepseek_chat.cache = False
     challenger_dataset = classify_blocks(deepseek_chat, incumbent_dataset)
     ties = [
         (incumbent_prediction, challenger_prediction)
