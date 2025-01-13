@@ -78,12 +78,14 @@ def optimize_judge(model):
         "programmer_2_requires_direct_modification"
     ]
     examples = [dspy.Example(judge_dataset[i]).with_inputs(*input_keys) for i in range(len(judge_dataset))]
+    random.seed(42)
+    random.shuffle(examples)
     program = dspy.Predict(BinaryClassificationTiebreaker)
-    with dspy.context(lm=model, async_max_workers=25):
+    with dspy.context(lm=model, async_max_workers=30):
         optimizer = dspy.teleprompt.MIPROv2(
             verbose=True,
             metric=direct_score,
-            auto="light",
+            auto="medium",
             prompt_model=model,
             task_model=model,
             dataset_summary_model=gpt_4o, # deepseek hangs
@@ -181,7 +183,7 @@ if __name__ == "__main__":
     cases_to_review = losses + not_confident
     print(f"Number of cases to review: {len(cases_to_review)}")
     time.sleep(5)
-    # sys.exit()
+    sys.exit()
     new_incumbent_data = []
     new_judge_data = []
     for i, (incumbent_prediction, challenger_prediction, judgement) in list(enumerate(cases_to_review)):

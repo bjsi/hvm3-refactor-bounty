@@ -9360,7 +9360,8 @@
     "requires_direct_modification": false,
     "confidence": 0.75
   }
-    ]
+    ],
+    "task_reflection": "The task involves completely removing native numbers as a feature from the HVM3 codebase. This means that all references to native number types (e.g., `u32`, `u64`, `W32`, etc.) and their associated operations must be eliminated. This will require identifying and modifying all parts of the codebase that rely on native numbers, including data structures, reduction functions, and compilation logic. The removal of native numbers will likely necessitate the introduction of alternative representations for numerical values, such as Church numerals or other functional encodings."
   },
   "remove the list/string pretty printers": {
     "task": "remove the list/string pretty printers",

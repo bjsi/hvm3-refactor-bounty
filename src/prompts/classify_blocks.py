@@ -205,7 +205,7 @@ def optimize(devset, task_lm, prompt_lm, teacher_lm, dataset_summary_lm):
     with dspy.context(lm=task_lm):
         optimizer = dspy.teleprompt.MIPROv2(
             metric=direct_score,
-            auto="medium",
+            auto="light",
             prompt_model=prompt_lm,
             task_model=task_lm,
             max_bootstrapped_demos=1,
@@ -218,10 +218,7 @@ def optimize(devset, task_lm, prompt_lm, teacher_lm, dataset_summary_lm):
             dataset_summary_model=dataset_summary_lm, # TODO: deepseek hangs
             # teacher_settings=dict(lm=teacher_lm), # causing hangs with deepseek
         )
-        optimized_program = optimizer.compile(
-            program,
-            trainset=devset,
-        )
+        optimized_program = optimizer.compile(program, trainset=devset)
         optimized_program.save(get_optimized_program_path(__file__))
 
 ###########
@@ -248,14 +245,16 @@ def classify_blocks(model, examples):
 # 1 block, deepseek, no optimizing, with filtering, accuracy 98%, f1 80%
 # -- OPTIMIZATION v1 -- only edge cases identified w/ tiebreaker
 # 1 block, gemini, optimizing, with filtering, accuracy 96%, f1 60% - hmm pretty much the same - the instructions are overfitting
-# -- OPTIMIZATION v2 -- 
+# -- OPTIMIZATION v2 -- balanced mix of edge cases and real tasks, cleaned any incorrect data
+# 1 block, gemini, optimizing, with filtering, accuracy 97%, f1 67% - hmm pretty much the same - the instructions are overfitting
 
 if __name__ == "__main__":
     # optimize(load_balanced_trainset(), gemini_8b, deepseek_chat, deepseek_chat, gpt_4o)
     real_tasks = load_real_tasks()
     task = list(real_tasks.values())[0]
-    dataset = load_trainset(lambda tasks: tasks[0:1])
-    results = classify_blocks(gemini_8b, dataset)
+    dataset = load_trainset(lambda tasks: tasks[2:3])[:3]
+    results = classify_blocks(deepseek_chat, dataset)
+    print(results[0].task_reflection)
     scores = []
     wrong_reasons = []
     for (result, datapoint) in list(zip(results, dataset)):
