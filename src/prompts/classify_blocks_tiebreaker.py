@@ -9,7 +9,7 @@ from src.filesystem import get_optimized_program_path
 from src.my_datasets import load_binary_classification_judge_data, save_binary_classification_judge_data, save_new_incumbent_data
 from src.prompts.classify_blocks import classify_blocks, convert_confidence_to_num, load_trainset
 from src.utils import run_dspy_parallel
-from src.llms import deepseek_chat
+from src.llms import deepseek_chat, gemini_8b, gpt_4o
 
 class BinaryClassificationTiebreaker(dspy.Signature):
     """You are a judge tasked with resolving a tie between two programmers' predictions about whether a code block requires direct modification.  You will be given the problem context, the two programmers' reasoning, and their predictions.  You will then need to determine which prediction is correct, and provide your reasoning for doing so."""
@@ -78,19 +78,17 @@ def optimize_judge(model):
         "programmer_2_requires_direct_modification"
     ]
     examples = [dspy.Example(judge_dataset[i]).with_inputs(*input_keys) for i in range(len(judge_dataset))]
-    random.seed(42)
-    random.shuffle(examples) # important eg. for data aware proposer, but still get the cache
     program = dspy.Predict(BinaryClassificationTiebreaker)
-    # hmmm, I don't know if this benefits the optimization process vs doing it from scratch
-    # if get_optimized_program_path(__file__).exists(): program.load(get_optimized_program_path(__file__))
-    with dspy.context(lm=model, async_max_workers=30):
+    with dspy.context(lm=model, async_max_workers=25):
         optimizer = dspy.teleprompt.MIPROv2(
+            verbose=True,
             metric=direct_score,
             auto="light",
             prompt_model=model,
             task_model=model,
+            dataset_summary_model=gpt_4o, # deepseek hangs
             max_bootstrapped_demos=1,
-            max_labeled_demos=2 if len(examples) < 10 else 4,
+            max_labeled_demos=6,
             num_threads=6,
             hide_demo_fields=[
                 "codebase_summary",
@@ -148,9 +146,9 @@ def review_case(incumbent, challenger, judgement):
 
 if __name__ == "__main__":
     # optimize_judge(deepseek_chat)
-    incumbent_dataset = load_trainset(lambda tasks: tasks[3:4])
+    incumbent_dataset = load_trainset(lambda tasks: tasks[0:1])
     # deepseek_chat.cache = False
-    challenger_dataset = classify_blocks(deepseek_chat, incumbent_dataset)
+    challenger_dataset = classify_blocks(gemini_8b, incumbent_dataset)
     ties = [
         (incumbent_prediction, challenger_prediction)
         for incumbent_prediction, challenger_prediction in zip(incumbent_dataset, challenger_dataset)

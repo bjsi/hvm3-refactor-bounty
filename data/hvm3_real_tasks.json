@@ -1597,8 +1597,8 @@
   },
   {
     "block_number": 307,
-    "reasoning": "The block in question (BLOCK 307) defines the `State` structure, which holds global runtime state, including the reduction stack, heap, and function book. This block does not directly define or interact with the `Lab` field of CTRs or their arity storage. Instead, it provides the foundational structure for the runtime state. The task requires modifying how CTRs store their arity, which would involve changes to the `Term` structure and the reduction logic, not the `State` structure itself. Therefore, this block does not require direct modification to achieve the task. However, the `State` structure might need to be extended to include a new field for storing arities globally, but this is not directly visible in the current block.",
-    "requires_direct_modification": false,
+    "reasoning": "The `State` struct defined in BLOCK 307 is a critical part of the HVM3 runtime environment, containing pointers to various global data structures. The task requires moving the arity of CTRs to a global static object in C, which would likely involve adding a new field to the `State` struct to store arity information indexed by the CID. This modification is necessary to ensure that the arity can be accessed globally and consistently across the runtime. Additionally, functions that use the `State` struct will need to be updated to interact with the new arity storage mechanism. Therefore, this block requires direct modification to accommodate the new global arity storage.",
+    "requires_direct_modification": true,
     "confidence": 0.75
   },
   {
@@ -2521,9 +2521,9 @@
   },
   {
     "block_number": 484,
-    "reasoning": "The `Book` structure in BLOCK 484 defines the high-level mappings for functions and constructors, including `ctrToAri` (constructor name to arity) and `ctrToCid` (constructor name to CID). These mappings are used during compilation and execution to look up constructor metadata. However, the task specifically targets the `Lab` field in CTR terms, which is not directly defined or modified in this block. The `Lab` field's representation and usage are handled elsewhere in the codebase, particularly in the C backend. Therefore, this block does not require direct modification to achieve the task. Instead, changes would be needed in the parts of the codebase that handle the `Lab` field's encoding and decoding, as well as the global static object in C for storing arity.",
-    "requires_direct_modification": false,
-    "confidence": 0.75
+    "reasoning": "BLOCK 484 defines the `Book` data structure, which includes the `ctrToAri` field, mapping constructor names to their arities. The task requires moving the arity out of the `Lab` field in CTR terms and into a global static object in C. Since the `ctrToAri` field currently stores arity information, it will need to be removed or repurposed to align with the new design. The `Book` structure is a central part of the compilation process, and changes to how arity is stored will necessitate updates to this block. Therefore, this block requires direct modification to remove the `ctrToAri` field and ensure that arity information is handled by the global static object in C.",
+    "requires_direct_modification": true,
+    "confidence": 0.9
   },
   {
     "block_number": 485,
@@ -2821,8 +2821,8 @@
       },
       {
         "block_number": 141,
-        "reasoning": "The block in question (BLOCK 141) uses `u12v2X $ termLab term` to extract the arity (`len`) from the `Lab` field of a `MAT` term. This is directly tied to the current implementation where the `Lab` field stores both the CID and the arity. If the arity is moved to a global static object in C, this block will need to be modified to retrieve the arity from the new location instead of extracting it from the `Lab` field. This is a direct modification because the logic for accessing the arity must change to align with the new design.",
-        "requires_direct_modification": true,
+        "reasoning": "BLOCK 141 handles `MAT` terms, not `CTR` terms. While `MAT` terms might indirectly interact with `CTR` terms, this block does not directly manipulate the `Lab` field of a `CTR` term. The code within BLOCK 141 extracts the length (`len`) from the `Lab` field using `u12v2X`, but this length is likely the arity of the `MAT` term, not the arity of a `CTR` term. Therefore, modifying the `Lab` field of a `CTR` term, as required by the task, is not relevant to this block. The necessary changes will be in functions that create or use `CTR` terms, not in functions that handle `MAT` terms.",
+        "requires_direct_modification": false,
         "confidence": 0.9
       },
       {
@@ -2887,8 +2887,8 @@
       },
       {
         "block_number": 237,
-        "reasoning": "This block creates Ctr terms directly in the parseStr function. It needs to be updated to only use the CID in the Ctr constructor, without including arity information.",
-        "requires_direct_modification": true,
+        "reasoning": "The code in BLOCK 237, `parseStr`, is parsing a string literal and constructing a `Ctr` term. Crucially, it's not directly involved in the *representation* of the `Lab` field or the encoding of the arity. It's creating a `Ctr` term, but the `Lab` field's contents are not being constructed or manipulated here. The function is concerned with parsing the string and building the `Ctr` data structure, not with the internal representation of the `Lab` field. Therefore, this block does not need direct modification to accommodate the change in how `CTR`s store their arity. The modification will be needed in the functions that create and use `CTR` terms, where the arity is extracted or used.",
+        "requires_direct_modification": false,
         "confidence": 0.9
       },
       {
@@ -2917,9 +2917,9 @@
       },
       {
         "block_number": 289,
-        "reasoning": "The block in question (BLOCK 289) handles the reduction of `DP1` (duplication) terms. Specifically, it checks the type of the term being duplicated and applies the appropriate reduction rule. For CTR terms, it calls `reduceDupCtr`, which likely uses the arity stored in the `Lab` field to determine how to duplicate the constructor. Since the task involves moving the arity out of the `Lab` field, this block will need to be modified to retrieve the arity from the new global static object in C instead of directly from the `Lab` field. This change will require updating the logic in `reduceDupCtr` and any other functions that rely on the arity being stored in the `Lab` field.",
-        "requires_direct_modification": true,
-        "confidence": 0.9
+        "reasoning": "The code in BLOCK 289 is part of the `reduceAt` function, which handles the reduction of terms at a specific location. The `DP1` case likely deals with a `Term` that has a `CTR` tag. Crucially, the code within this block does not directly manipulate the `Lab` field of a `CTR` term. Instead, it retrieves a value (`sb1`) from a memory location (`loc + 1`) and checks a bit within that value. If the bit is 0, it proceeds with reduction. If the bit is 1, it modifies the `host` location. In either case, the code does not extract or use the arity from the `Lab` field. Therefore, modifying the `Lab` field to only contain the CID will not affect the code within this block directly. The changes needed to accommodate the new structure will likely be in functions that create `CTR` terms or access their arity.",
+        "requires_direct_modification": false,
+        "confidence": 0.8
       },
       {
         "block_number": 290,

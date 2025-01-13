@@ -12,6 +12,7 @@ class DetermineRelatedness(dspy.Signature):
     symbol: str = dspy.InputField()
     explanation: str = dspy.InputField()
     task: str = dspy.InputField()
+    reasoning: str = dspy.InputField()
     is_related: bool = dspy.OutputField()
     confidence: float = dspy.OutputField(ge=0.0, le=1.0)
 
