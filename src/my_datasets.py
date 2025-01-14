@@ -2,7 +2,6 @@ from typing import Literal
 from src.utils import load_json, load_jsonl, save_json
 from src.filesystem import data_dir
 
-
 def load_real_tasks():
     return load_json(data_dir / "hvm3_real_tasks.json")
 

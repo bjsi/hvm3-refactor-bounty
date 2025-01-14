@@ -378,3 +378,20 @@ def get_block_code(block_number: int):
         next_block = re.search(next_block_pattern, code[start:])
         end = start + next_block.start() if next_block else len(code)
         return code[start:end]
+    
+def create_contexts_for_blocks(block_numbers: list[int]):
+    hs_ctx = FileContext(data_dir / "hvm-code.hs")
+    c_ctx = FileContext(data_dir / "hvm-code.c")
+    hs_ctx.show_blocks(block_numbers).show_parents()
+    c_ctx.show_blocks(block_numbers).show_parents()
+    return hs_ctx, c_ctx
+
+def format_block_context(hs_ctx, c_ctx):
+    """Add an END BLOCK comment to the end of the block."""
+    s = format_contexts(hs_ctx, c_ctx)
+    match = re.search(r"(//|--)\s+BLOCK \d+", s)
+    if match: match = match.group().split()[0]  # Get just the // or -- part
+    lines = s.split('\n')
+    end_block_line = f"{match} BLOCK END"
+    lines = lines[:-2] + [end_block_line] + lines[-2:]
+    return "\n".join(lines)

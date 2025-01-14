@@ -1,16 +1,14 @@
 import asyncio
-import json
 import random
 import re
-import sys
-from typing import Callable, Literal, Optional
+from typing import Callable, Literal
 import dspy
 import dspy.teleprompt
-from src.my_datasets import load_binary_classification_judge_data, load_codebase_summary, load_real_tasks, load_symbol_explanations
-from src.file_context import FileContext, get_all_block_numbers, find_block_numbers, format_contexts, get_all_names, get_block_code, hide_block_numbers
+from src.my_datasets import load_binary_classification_judge_data, load_real_tasks, load_symbol_explanations
+from src.file_context import FileContext, create_contexts_for_blocks, format_block_context, get_all_block_numbers, find_block_numbers, format_contexts, hide_block_numbers
 from src.filesystem import data_dir, get_optimized_program_path
-from src.utils import run_dspy_parallel
-from src.llms import gemini_8b, deepseek_chat, claude_sonnet, gpt_4o, gemini_flash, gemini_pro, phi_4
+from src.utils import convert_confidence_to_num, parse_confidence, run_dspy_parallel
+from src.llms import gemini_8b, deepseek_chat, gpt_4o
 
 class ClassifyBlock(dspy.Signature):
     """
@@ -31,23 +29,6 @@ class ClassifyBlock(dspy.Signature):
 ##########
 # Training
 ##########
-
-def create_contexts_for_blocks(block_numbers: list[int]):
-    hs_ctx = FileContext(data_dir / "hvm-code.hs")
-    c_ctx = FileContext(data_dir / "hvm-code.c")
-    hs_ctx.show_blocks(block_numbers).show_parents()
-    c_ctx.show_blocks(block_numbers).show_parents()
-    return hs_ctx, c_ctx
-
-def format_block_context(hs_ctx, c_ctx):
-    """Add an END BLOCK comment to the end of the block."""
-    s = format_contexts(hs_ctx, c_ctx)
-    match = re.search(r"(//|--)\s+BLOCK \d+", s)
-    if match: match = match.group().split()[0]  # Get just the // or -- part
-    lines = s.split('\n')
-    end_block_line = f"{match} BLOCK END"
-    lines = lines[:-2] + [end_block_line] + lines[-2:]
-    return "\n".join(lines)
 
 def load_judged_edge_cases():
     real_tasks = load_real_tasks()
@@ -149,20 +130,6 @@ def load_trainset(filter_tasks: Callable[[list], bool] = lambda _: True):
         all_examples.extend(task_examples)
     return all_examples
 
-def convert_confidence_to_num(confidence: float | Literal["low", "medium", "high", "very high"]):
-    if isinstance(confidence, float): return confidence
-    return {"low": 0.25, "medium": 0.5, "high": 0.75, "very high": 0.9, "certain": 1.0}[confidence]
-
-def convert_num_to_confidence(num: float) -> Literal["low", "medium", "high", "very high"]:
-    if num < 0.5: return "low"
-    elif num < 0.75: return "medium"
-    elif num < 0.9: return "high"
-    else: return "very high"
-
-def parse_confidence(x: str | float) -> Literal["low", "medium", "high", "very high"]:
-    if isinstance(x, float): return convert_num_to_confidence(x)
-    return x
-
 def direct_score(example, pred, trace=None):
     predicted = pred.requires_direct_modification and convert_confidence_to_num(pred.confidence) >= 0.75
     actual = example.requires_direct_modification
@@ -183,16 +150,16 @@ def optimize(devset, task_lm, prompt_lm, teacher_lm, dataset_summary_lm):
     with dspy.context(lm=task_lm, async_max_workers=10):
         optimizer = dspy.teleprompt.MIPROv2(
             metric=direct_score,
-            auto="medium",
+            auto="light",
             prompt_model=prompt_lm,
             task_model=task_lm,
             max_bootstrapped_demos=1,
-            max_labeled_demos=16,
+            max_labeled_demos=5,
             num_threads=10,
             hide_demo_fields=[
                 "codebase_summary",
                 "codebase_symbol_explanations",
-                #"specific_context",
+                "specific_context",
             ],
             dataset_summary_model=dataset_summary_lm, # TODO: deepseek hangs
             teacher_settings=dict(lm=teacher_lm), # causing hangs with deepseek
@@ -207,7 +174,6 @@ def optimize(devset, task_lm, prompt_lm, teacher_lm, dataset_summary_lm):
 def classify_blocks(model, examples):
     program = dspy.Predict(ClassifyBlock)
     if get_optimized_program_path(__file__).exists():
-        print("Using optimized classify_blocks program")
         program.load(get_optimized_program_path(__file__))
     with dspy.context(lm=model, async_max_workers=50):
         results = asyncio.run(run_dspy_parallel(program, examples))
