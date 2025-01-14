@@ -1,6 +1,5 @@
 import dspy
 import json
-import asyncio
 import sys
 from src.file_context import create_contexts_for_blocks, format_block_context, get_all_block_numbers, hide_block_numbers
 from src.my_datasets import load_symbol_explanations
@@ -45,4 +44,4 @@ if __name__ == "__main__":
         print("Please provide a task as the first argument.")
         sys.exit(1)
     task = sys.argv[1]
-    asyncio.run(predict_blocks(task))
+    predict_blocks(task)
