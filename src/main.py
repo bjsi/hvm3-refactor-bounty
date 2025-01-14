@@ -2,15 +2,15 @@ import dspy
 import json
 import asyncio
 import sys
-from src.file_context import create_contexts_for_blocks, format_block_context, get_all_block_numbers, get_all_names, hide_block_numbers
-from src.my_datasets import load_codebase_summary, load_symbol_explanations
+from src.file_context import create_contexts_for_blocks, format_block_context, get_all_block_numbers, hide_block_numbers
+from src.my_datasets import load_symbol_explanations
 from src.prompts.classify_blocks import classify_blocks
 from src.llms import gemini_8b
 from src.prompts.classify_symbols import classify_symbols
 
-ASYNC_MAX_WORKERS = 300 # crank as high as you can
+ASYNC_MAX_WORKERS = 300
 
-def predict_blocks(task: str, model=gemini_8b, verbose=False):
+def predict_blocks(task: str, model=gemini_8b):
     block_numbers = sorted(get_all_block_numbers())
     sym_exps = load_symbol_explanations()
     sym_exps = {exp["name"]: exp["explanation"] for exp in sym_exps}
@@ -20,7 +20,7 @@ def predict_blocks(task: str, model=gemini_8b, verbose=False):
     classify_symbols_input_keys = ['task', 'symbol', 'explanation']
     for sym, exp in sym_exps.items():
         examples.append(dspy.Example(task=task, symbol=sym, explanation=exp).with_inputs(*classify_symbols_input_keys))
-    related_symbols = classify_symbols(task, examples, model, async_max_workers=ASYNC_MAX_WORKERS, cache=False)
+    related_symbols = classify_symbols(examples=examples, model=model, async_max_workers=ASYNC_MAX_WORKERS, cache=False)
 
     ## classify blocks
     examples = []
@@ -34,14 +34,12 @@ def predict_blocks(task: str, model=gemini_8b, verbose=False):
             specific_context=task_specific_context,
             block_number=block_number,
         ).with_inputs(*classify_blocks_input_keys))
-    block_results = classify_blocks(model=model, examples=examples, async_max_workers=ASYNC_MAX_WORKERS)
-    block_numbers = [block_result.block_number for block_result in block_results]
-    return block_numbers
+    blocks = classify_blocks(model=model, examples=examples, async_max_workers=ASYNC_MAX_WORKERS, cache=False)
+    print(json.dumps(blocks))
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Please provide a task as the first argument.")
         sys.exit(1)
     task = sys.argv[1]
-    blocks = asyncio.run(predict_blocks(task))
-    sys.stdout.write(json.dumps(blocks))
+    asyncio.run(predict_blocks(task))

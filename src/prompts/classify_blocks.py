@@ -161,12 +161,15 @@ def optimize(devset, task_lm, prompt_lm, teacher_lm, dataset_summary_lm):
 ###########
 
 def classify_blocks(model, examples, async_max_workers: int = 50, cache=True):
+    model.cache = cache
     program = dspy.Predict(ClassifyBlock)
     if get_optimized_program_path(__file__).exists():
+        print("using optimized classify_blocks program")
         program.load(get_optimized_program_path(__file__))
     with dspy.context(lm=model, async_max_workers=async_max_workers, cache=cache):
         results = asyncio.run(run_dspy_parallel(program, examples))
-    return results
+    return [ex.block_number for ex, result in zip(examples, results)
+            if result.requires_direct_modification and convert_confidence_to_num(result.confidence) >= 0.75]
 
 if __name__ == "__main__":
     optimize(load_balanced_trainset(), gemini_8b, deepseek_chat, deepseek_chat, gpt_4o)

@@ -69,11 +69,13 @@ def optimize(devset, task_lm, prompt_lm, teacher_lm):
 ###########
 
 def classify_symbols(examples: list[dspy.Example], model: dspy.LM, async_max_workers=50, cache=True):
+    model.cache = cache
     program = dspy.Predict(ClassifySymbol)
     if get_optimized_program_path(__file__).exists():
+        print("using optimized classify_symbols program")
         program.load(get_optimized_program_path(__file__))
-    with dspy.context(lm=model, async_max_workers=async_max_workers, cache=cache):
-        results = asyncio.run(run_dspy_parallel(program, examples))
+    with dspy.context(lm=model, async_max_workers=async_max_workers):
+        results = asyncio.run(run_dspy_parallel(program, examples, 'classify_symbols'))
     related_symbols = [example.symbol for example, result in zip(examples, results)
                        if result.is_related and convert_confidence_to_num(result.confidence) >= 0.75]
     return related_symbols
