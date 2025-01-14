@@ -170,30 +170,3 @@ def classify_blocks(model, examples, async_max_workers: int = 50, cache=True):
 
 if __name__ == "__main__":
     optimize(load_balanced_trainset(), gemini_8b, deepseek_chat, deepseek_chat, gpt_4o)
-    # real_tasks = load_real_tasks()
-    # dataset = load_trainset(lambda tasks: tasks[0:1])[:1]
-    # # gemini_flash.cache = False
-    # results = classify_blocks(gemini_8b, dataset)
-    # scores = []
-    # wrong_reasons = []
-    # for (result, datapoint) in list(zip(results, dataset)):
-    #     score = direct_score(datapoint, result)
-    #     scores.append(score)
-    #     if score == 0:
-    #         reason = "wrong" if result.requires_direct_modification != datapoint.requires_direct_modification else "low confidence"
-    #         if reason == "low confidence": continue
-    #         print(f"block {datapoint.block_number}")
-    #         print(f"code: {get_block_code(datapoint.block_number)}")
-    #         print(f"reasoning: {result.reasoning}")
-    #         print(f"prediction: {result.requires_direct_modification}")
-    #         print(f"confidence: {result.confidence}")
-    #         print(f"score: {score}")
-    #         wrong_reasons.append(reason)
-    #         print(f"reason for fail {reason}")
-    #         print('---')
-
-    # expected_blocks_to_edit = set([example.block_number for example in dataset if example.requires_direct_modification and convert_confidence_to_num(example.confidence) >= 0.75])
-    # actual_blocks_to_edit = set([example.block_number for example, result in zip(dataset, results) if result.requires_direct_modification and convert_confidence_to_num(result.confidence) >= 0.75])
-    # print(f"f1 score: {f1_score(expected_blocks_to_edit, actual_blocks_to_edit)}")
-    # print(f"accuracy: {sum(scores) / len(scores)}")
-    # print(gemini_8b.inspect_history())

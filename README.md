@@ -43,10 +43,13 @@ I wanted to see how good a small, cheap model could do at this task, so I used G
 - Determining whether a block must be edited is quite challenging. I struggled to gather data here manually.
 - I came up with an automated way to get data - I repeatedly ran `classify_blocks` over Victor's list of refactoring examples and used an LLM judge to decide in cases where there were classification disagreements between runs. I made a simple CLI function to review disagreements and optimized the LLM judge using `dspy` on the disagreement dataset.
 - I only figured out how to do this later in the competition and had to move on to other things, but by iterating in this manner and optimizing on the final dataset I was able to raise Gemini 8b's performance from ~55% to 87% accuracy.
+- It is interesting to scroll through the optimized prompts in the `optimized_programs` directory.
 
 ## Thoughts
-- I ran out of time to do a really rigorous evaluation of the full pipeline. I will probably evaluate it on my own codebase instead because I am not a good judge of the output for HVM3.
-- There is significant ambiguity in determining what is relevant to a refactoring request.
-- `dspy` is great, though it is not a panacea and you still need to do a lot of work to get good results. I am sure someone with more experience could improve the results further.
-- I wasted a lot of time fooling myself with evaluation metrics because I didn't balance the classification datasets.
-- I am quite excited about the potential of active learning with LLM as a judge techniques in `dspy`!
+
+- Firstly, this was a lot of fun and I want to attempt more things like this! (lmk if you have some tasks for me!)
+- I ran out of time to do a really rigorous evaluation of the full pipeline. I will probably evaluate it on my own codebase instead because I am not a good judge of the output for HVM3. I am curious what Victor thinks. You can swap models and re-optimize on different models. I tried a bunch but found that Gemini 8b was the best model for this task because of its low cost, low latency, high RPM rate limit and decent reasoning ability.
+- There is significant ambiguity in determining what is relevant to a refactoring request if you are being picky. It definitely requires strong reasoning.
+- `dspy` is excellent, though it is not a panacea and you still need to do a lot of work to get good results. `dspy` performs search over the space of possible prompts, but you still have to search over the space of possible `dspy` programs. I am sure someone with more experience could improve the results further.
+- I wasted a lot of time fooling myself with evaluation metrics because I didn't balance the classification datasets. I am still somewhat nervous about them...
+- I am quite excited about the potential of active learning with LLM as a judge techniques in `dspy`! It could be used to align end-user preferences with a prompt's behavior without fine-tuning and has great potential in synthetic data collection.

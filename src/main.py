@@ -8,19 +8,19 @@ from src.prompts.classify_blocks import classify_blocks
 from src.llms import gemini_8b
 from src.prompts.classify_symbols import classify_symbols
 
+ASYNC_MAX_WORKERS = 300 # crank as high as you can
+
 def predict_blocks(task: str, model=gemini_8b, verbose=False):
-    symbols = get_all_names()[0]
     block_numbers = sorted(get_all_block_numbers())
     sym_exps = load_symbol_explanations()
     sym_exps = {exp["name"]: exp["explanation"] for exp in sym_exps}
-    codebase_summary = load_codebase_summary()
 
     ## get relevant symbols (fn names, types etc)
     examples = []
     classify_symbols_input_keys = ['task', 'symbol', 'explanation']
     for sym, exp in sym_exps.items():
         examples.append(dspy.Example(task=task, symbol=sym, explanation=exp).with_inputs(*classify_symbols_input_keys))
-    related_symbols = classify_symbols(task, examples, model, async_max_workers=200, cache=False)
+    related_symbols = classify_symbols(task, examples, model, async_max_workers=ASYNC_MAX_WORKERS, cache=False)
 
     ## classify blocks
     examples = []
@@ -34,7 +34,7 @@ def predict_blocks(task: str, model=gemini_8b, verbose=False):
             specific_context=task_specific_context,
             block_number=block_number,
         ).with_inputs(*classify_blocks_input_keys))
-    block_results = classify_blocks(model=model, examples=examples, async_max_workers=200)
+    block_results = classify_blocks(model=model, examples=examples, async_max_workers=ASYNC_MAX_WORKERS)
     block_numbers = [block_result.block_number for block_result in block_results]
     return block_numbers
 
