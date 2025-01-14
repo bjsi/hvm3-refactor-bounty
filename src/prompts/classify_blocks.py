@@ -53,7 +53,6 @@ def load_judged_edge_cases():
     random.shuffle(examples)
     return examples
 
-# try to balance positives, negatives and hard edge cases mined from the judge
 def load_balanced_trainset():
     edge_cases = load_judged_edge_cases()
     real_tasks_examples = load_trainset(lambda tasks: tasks[:6])
@@ -68,10 +67,10 @@ def load_balanced_trainset():
     k = min(len(true_cases), len(false_cases))
     
     true_cases = random.choices(true_cases, k=k)
-    false_cases = random.choices(false_cases, k=k + 150)
+    false_cases = random.choices(false_cases, k=k)
 
     # Combine edge cases with balanced real task examples
-    balanced_examples = true_cases + false_cases + edge_cases
+    balanced_examples = true_cases + false_cases # + edge_cases
     print(f"balanced_examples: {len(balanced_examples)}\npositive: {len(true_cases)}\nnegative: {len(false_cases)}")
 
     random.seed(42)
@@ -140,11 +139,11 @@ def optimize(devset, task_lm, prompt_lm, teacher_lm, dataset_summary_lm):
     with dspy.context(lm=task_lm, async_max_workers=10):
         optimizer = dspy.teleprompt.MIPROv2(
             metric=direct_score,
-            auto="light",
+            auto="medium",
             prompt_model=prompt_lm,
             task_model=task_lm,
             max_bootstrapped_demos=1,
-            max_labeled_demos=5,
+            max_labeled_demos=6,
             num_threads=10,
             hide_demo_fields=[
                 "codebase_summary",

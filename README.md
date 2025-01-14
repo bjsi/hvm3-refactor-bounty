@@ -4,18 +4,19 @@ Develop an AI tool that, given the current snapshot of HVM3's codebase and a ref
 
 ## Setup
 
-- Clone the repo + submodules.
+- `git clone --recurse-submodules`
 - `python3 -m venv env`
 - `source env/bin/activate`
 - `pip install -r requirements.txt`
 - `npm install tree-sitter`
-- Create a `.env` file with an `OPENROUTER_API_KEY`.
+- Create a `.env` file with your `GEMINI_API_KEY`.
 
-## Approach
+To run the pipeline on a task run:
 
-## Timings and costs
+`python -m src.main`
 
-- There are ~270 code symbols
-- ...
+## High-level Approach
 
-## Notes
+I wanted to see how good a small, cheap model could do at this task, so I used Gemini Flash 8b. I wrote a `FileContext` class that uses tree-sitter to parse the C and Haskell code to provide accurate context. I used the `dspy` Python library to write and optimize the prompts instructions and few-shot examples. Finally, I developed a semi-automated active learning approach to mining synthetic task data based on the refactoring examples Victor shared on Discord.
+
+### Details
