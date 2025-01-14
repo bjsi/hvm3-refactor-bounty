@@ -1,12 +1,11 @@
 import asyncio
 import random
-import re
 from typing import Callable, Literal
 import dspy
 import dspy.teleprompt
 from src.my_datasets import load_binary_classification_judge_data, load_real_tasks, load_symbol_explanations
-from src.file_context import FileContext, create_contexts_for_blocks, format_block_context, get_all_block_numbers, find_block_numbers, format_contexts, hide_block_numbers
-from src.filesystem import data_dir, get_optimized_program_path
+from src.file_context import create_contexts_for_blocks, format_block_context, get_all_block_numbers, find_block_numbers, hide_block_numbers
+from src.filesystem import get_optimized_program_path
 from src.utils import convert_confidence_to_num, parse_confidence, run_dspy_parallel
 from src.llms import gemini_8b, deepseek_chat, gpt_4o
 
@@ -35,18 +34,8 @@ def load_judged_edge_cases():
     sym_exps = load_symbol_explanations()
     sym_exps = {exp["name"]: exp["explanation"] for exp in sym_exps}
     judge_data = load_binary_classification_judge_data()
-    input_keys = [
-        "codebase_symbol_explanations",
-        "specific_context",
-        "task",
-        "block_number",
-    ]
-    output_keys = [
-        "task_reflection",
-        "reasoning",
-        "requires_direct_modification",
-        "confidence",
-    ]
+    input_keys = [ "codebase_symbol_explanations", "specific_context", "task", "block_number"]
+    output_keys = ["task_reflection", "reasoning", "requires_direct_modification", "confidence"]
     all_keys = set(input_keys + output_keys)
     examples = []
     for data in judge_data:
@@ -64,6 +53,7 @@ def load_judged_edge_cases():
     random.shuffle(examples)
     return examples
 
+# try to balance positives, negatives and hard edge cases mined from the judge
 def load_balanced_trainset():
     edge_cases = load_judged_edge_cases()
     real_tasks_examples = load_trainset(lambda tasks: tasks[:6])
@@ -171,11 +161,11 @@ def optimize(devset, task_lm, prompt_lm, teacher_lm, dataset_summary_lm):
 # Inference
 ###########
 
-def classify_blocks(model, examples):
+def classify_blocks(model, examples, async_max_workers: int = 50, cache=True):
     program = dspy.Predict(ClassifyBlock)
     if get_optimized_program_path(__file__).exists():
         program.load(get_optimized_program_path(__file__))
-    with dspy.context(lm=model, async_max_workers=50):
+    with dspy.context(lm=model, async_max_workers=async_max_workers, cache=cache):
         results = asyncio.run(run_dspy_parallel(program, examples))
     return results
 

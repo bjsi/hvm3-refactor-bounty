@@ -6,6 +6,9 @@ from tree_sitter_languages import get_language, get_parser
 from src.filesystem import tree_sitter_haskell_dir, tree_sitter_haskell_lib, data_dir
 
 def setup_tree_sitter(file: Path):
+    import warnings
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+    warnings.filterwarnings("ignore", category=FutureWarning)
     ext = file.suffix
     if ext == ".hs":
         if not tree_sitter_haskell_lib.exists():

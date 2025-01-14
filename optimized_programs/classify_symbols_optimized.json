@@ -1,0 +1,79 @@
+{
+  "lm": null,
+  "traces": [],
+  "train": [],
+  "demos": [
+    {
+      "augmented": true,
+      "task": "measure interactions by interaction type instead of just storing the total count. report results segmented by interaction type",
+      "symbol": "reduceMatCtr",
+      "explanation": "The `reduceMatCtr` function in the HVM3 runtime handles the reduction of a `MAT` term when the matched constructor (`CTR`) is known.  It takes two `Term` arguments: `mat` (the `MAT` term) and `ctr` (the constructor term).  The function's logic distinguishes between an \"if-let\" style match (where the constructor is checked against a specific value) and a standard match.  In the \"if-let\" case, it checks if the constructor number in the `mat` term matches the constructor number in the `ctr` term.  If they match, it constructs a new `APP` term by applying the constructor's arguments to the `MAT` term's arguments.  If they don't match, it constructs a new `APP` term with the `MAT` term's default argument.  In the standard match case, it directly applies the constructor's arguments to the `MAT` term's arguments, constructing a series of `APP` terms.  This function is crucial for pattern matching in the functional language implemented by HVM3, enabling the runtime to evaluate expressions based on the structure of the data being matched.  The function uses `alloc_node`, `set`, and `got` for memory management, demonstrating the runtime's dynamic nature.",
+      "reasoning": "The `reduceMatCtr` function is specifically related to pattern matching and term reduction in the HVM3 runtime, which is a low-level implementation detail of a functional language runtime. The task, on the other hand, involves measuring and reporting interactions by type, which is a high-level application logic concern unrelated to runtime mechanics or pattern matching. There is no overlap in purpose, functionality, or context between the symbol and the task.",
+      "is_related": false,
+      "confidence": "very high"
+    },
+    {
+      "augmented": true,
+      "task": "implement a feature that prevents the user from creating two constructors with the same name. show a helpful error when that happens.",
+      "symbol": "parseName1",
+      "explanation": "The `parseName1` function is a key utility in the HVM3 codebase for parsing valid names, which are used to identify variables, functions, constructors, and other program entities. It employs the `many1` combinator to parse one or more characters from a set of allowed characters (alphanumeric, underscores, dollar signs, and ampersands), ensuring syntactically correct and unambiguous names. This function is reused across various parsing tasks, such as extracting variable names in lambda expressions, parsing references, identifying constructor names, and handling pattern matching cases. By centralizing name parsing logic, `parseName1` enhances code consistency, reduces redundancy, and minimizes parsing errors, contributing to the overall robustness and maintainability of the codebase.",
+      "reasoning": "The `parseName1` function is responsible for parsing valid names, including constructor names, in the HVM3 codebase. While it ensures that names are syntactically correct, it does not inherently handle the uniqueness of constructor names. The task involves implementing a feature to prevent duplicate constructor names and providing a helpful error message. Although `parseName1` is not directly responsible for enforcing uniqueness, it is indirectly related because it parses the names that need to be checked for uniqueness. Therefore, understanding `parseName1` is essential for correctly parsing and validating constructor names as part of the task.",
+      "is_related": true,
+      "confidence": "high"
+    },
+    {
+      "augmented": true,
+      "task": "make CTRs store only the CID in the Lab field, and move the arity to a global static object in C",
+      "symbol": "cont",
+      "explanation": "The `cont` function in the HVM3 codebase acts as a continuation mechanism, enabling the sequential application of reduction rules within the parallel execution model.  It takes a `host` (likely a memory location) and an `action` (a function representing the next reduction step) as input.  The `action` is executed, and the result is stored in the `host` location.  Crucially, after the `action` completes, `reduceAt` is recursively called with the `host` location, ensuring that the reduction process continues in a sequential manner, even though sub-computations might be performed in parallel.  This design is essential for maintaining the correct order of evaluation in a parallel functional language, ensuring that the final result is consistent with the sequential semantics of the program.  The `cont` function is a key component of the HVM3 runtime's ability to manage the complex interactions between parallel and sequential execution.",
+      "reasoning": "The task involves modifying how CTRs (likely constructors) store their data, specifically moving the arity to a global static object in C and storing only the CID in the Lab field. This task is focused on data representation and memory layout changes in the runtime. The `cont` function, as described, is primarily concerned with managing the sequential application of reduction rules in a parallel execution model. While `cont` is a critical part of the runtime, it does not directly interact with the data representation of CTRs or their arity. Therefore, the `cont` function is not essential context for this task.",
+      "is_related": false,
+      "confidence": "high"
+    },
+    {
+      "augmented": true,
+      "task": "completely remove native numbers as a feature",
+      "symbol": "_W32_",
+      "explanation": "`_W32_` is a tag in the HVM3 system representing a 32-bit unsigned integer type.  It's used to represent and manipulate integer values within the functional programming language.  The code demonstrates how `_W32_` terms are created during compilation (e.g., from `U32` values), and how the runtime handles them during reduction.  Crucially, the code shows that `_W32_` terms are integrated into the broader HVM3 reduction system, participating in operations like arithmetic (`OP_ADD`, `OP_SUB`, etc.), comparisons, and interactions with other term types.  This indicates that `_W32_` is a fundamental data type for numerical computations within the HVM3 runtime.  The presence of specialized reduction functions like `reduceAppW32`, `reduceMatW32`, `reduceOpxW32`, and `reduceDupW32` further emphasizes the importance of `_W32_` in the parallel execution model, as these functions handle the specific reduction rules for `_W32_` terms.",
+      "reasoning": "The task involves completely removing native numbers as a feature. The symbol `_W32_` represents a 32-bit unsigned integer type, which is a form of native number in the HVM3 system. Since the task explicitly targets the removal of native numbers, `_W32_` is directly relevant as it is a fundamental part of the native number system in the codebase. Removing native numbers would inherently require addressing how `_W32_` terms are handled, including their creation, reduction, and interactions with other term types. Therefore, `_W32_` is essential context for this task.",
+      "is_related": true,
+      "confidence": "very high"
+    }
+  ],
+  "signature": {
+    "instructions": "You are a senior software engineer working on a critical system upgrade for a high-performance functional programming language compiler. The system is used in a mission-critical application where any failure could result in significant financial loss or safety risks. Your task is to determine whether a specific codebase symbol is essential context for implementing a given task. Carefully analyze the symbol's explanation and the task description. Consider the symbol's role in the codebase, such as memory allocation, parsing, or metadata management, and assess whether it directly or indirectly contributes to the task. Provide a detailed reasoning for your decision, clearly explaining why the symbol is or is not relevant. Additionally, assign a confidence level (low, medium, high, very high) to your assessment, reflecting the certainty of your conclusion. Your response must be precise and well-justified, as any oversight could lead to system instability or failure.",
+    "fields": [
+      {
+        "prefix": "Symbol:",
+        "description": "${symbol}"
+      },
+      {
+        "prefix": "Explanation:",
+        "description": "${explanation}"
+      },
+      {
+        "prefix": "Task:",
+        "description": "${task}"
+      },
+      {
+        "prefix": "Reasoning:",
+        "description": "${reasoning}"
+      },
+      {
+        "prefix": "Is Related:",
+        "description": "${is_related}"
+      },
+      {
+        "prefix": "Confidence:",
+        "description": "${confidence}"
+      }
+    ]
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.12.3",
+      "dspy": "2.5.43",
+      "cloudpickle": "3.1.0"
+    }
+  }
+}

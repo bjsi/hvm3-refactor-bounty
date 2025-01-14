@@ -14,6 +14,7 @@ from src.llms import deepseek_chat, gemini_8b, gpt_4o
 # really scrappy code, but the idea is pretty cool
 # use active learning to bootstrap classification labels
 # optimize a judge to reduce manual labeling burden and get high quality labels
+# should be cleaned up, generalized and turned into an optimizer
 
 class BinaryClassificationTiebreaker(dspy.Signature):
     """You are a judge tasked with resolving a tie between two programmers' predictions about whether a code block requires direct modification.  You will be given the problem context, the two programmers' reasoning, and their predictions.  You will then need to determine which prediction is correct, and provide your reasoning for doing so."""

@@ -7,6 +7,9 @@ from src.file_context import create_contexts_for_name, format_contexts, get_all_
 from src.llms import deepseek_chat, gemini_8b
 from src.utils import load_codebase_summary, load_jsonl, run_dspy_parallel
 
+# my first attempt at a judge, ./classify_blocks_tiebreaker.py is better
+# that should be cleaned, generalized and replace the one here too
+
 class ExplainCodebaseSymbol(dspy.Signature):
     codebase_summary: str = dspy.InputField()
     codebase_symbol: str = dspy.InputField()
