@@ -12,8 +12,9 @@ def setup_tree_sitter(file: Path):
     ext = file.suffix
     if ext == ".hs":
         if not tree_sitter_haskell_lib.exists():
-            Language.build_library(tree_sitter_haskell_lib, [tree_sitter_haskell_dir])
-        HASKELL_LANGUAGE = Language(tree_sitter_haskell_lib, 'haskell')
+            print("Building tree-sitter-haskell library...")
+            Language.build_library(str(tree_sitter_haskell_lib), [str(tree_sitter_haskell_dir)])
+        HASKELL_LANGUAGE = Language(str(tree_sitter_haskell_lib), 'haskell')
         parser = Parser()
         parser.set_language(HASKELL_LANGUAGE)
         return parser, HASKELL_LANGUAGE
