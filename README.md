@@ -15,7 +15,7 @@ To run the pipeline on a task run:
 
 `python -m src.main <task>`
 
-NOTE: The rate limit for Gemini 8b is 4000/min and this pipeline makes < 1000 requests but I was occasionally hitting the rate limit so I had to turn down `ASYNC_MAX_WORKERS` to 20 in `src/main.py`. Try turning this up to 300 and see if it works?
+NOTE: The rate limit for Gemini 8b is 4000/min and this pipeline makes < 1000 requests per task but I was occasionally hitting rate limit errors so I had to turn down `ASYNC_MAX_WORKERS` to 20 in `src/main.py` which is making things really slow :(. Try turning this up to 300 and see if it works?
 
 ## High-level Approach
 
