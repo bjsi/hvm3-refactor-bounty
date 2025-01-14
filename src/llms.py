@@ -10,6 +10,7 @@ provider_to_api_key = {
     "gemini": os.getenv("GEMINI_API_KEY"),
     "deepseek": os.getenv("DEEPSEEK_API_KEY"),
     "openai": os.getenv("OPENAI_API_KEY"),
+    "deepinfra": os.getenv("DEEPINFRA_API_KEY"),
 }
 
 model_to_provider = {
@@ -23,6 +24,7 @@ model_to_provider = {
     "deepseek/deepseek-chat": "deepseek",
     "deepseek-chat": "deepseek",
     "openrouter/openai/gpt-4o-mini": "openai",
+    "deepinfra/microsoft/phi-4": "deepinfra",
 }
 
 provider_to_base_url = {
@@ -30,6 +32,7 @@ provider_to_base_url = {
     "deepseek": "https://api.deepseek.com",
     "gemini": None,
     "openai": None,
+    "deepinfra": None,
 }
 
 def get_lm(model: str):
@@ -48,3 +51,4 @@ gemini_pro = get_lm("gemini/gemini-1.5-pro")
 deepseek_chat = get_lm("deepseek/deepseek-chat")
 claude_sonnet = get_lm("openrouter/anthropic/claude-3.5-sonnet-20240620")
 gpt_4o = get_lm("openrouter/openai/gpt-4o")
+phi_4 = get_lm("deepinfra/microsoft/phi-4")

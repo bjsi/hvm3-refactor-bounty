@@ -11,6 +11,10 @@ from src.prompts.classify_blocks import classify_blocks, convert_confidence_to_n
 from src.utils import run_dspy_parallel
 from src.llms import deepseek_chat, gemini_8b, gpt_4o
 
+# really scrappy code, but the idea is pretty cool
+# use active learning to bootstrap classification labels
+# optimize a judge to reduce manual labeling burden and get high quality labels
+
 class BinaryClassificationTiebreaker(dspy.Signature):
     """You are a judge tasked with resolving a tie between two programmers' predictions about whether a code block requires direct modification.  You will be given the problem context, the two programmers' reasoning, and their predictions.  You will then need to determine which prediction is correct, and provide your reasoning for doing so."""
     # problem context
@@ -148,21 +152,20 @@ def review_case(incumbent, challenger, judgement):
 
 if __name__ == "__main__":
     # optimize_judge(deepseek_chat)
-    incumbent_dataset = load_trainset(lambda tasks: tasks[4:5])
-    deepseek_chat.cache = False
-    challenger_dataset = classify_blocks(deepseek_chat, incumbent_dataset)
-    ties = [
+    incumbent_dataset = load_trainset(lambda tasks: tasks[0:1])
+    challenger_dataset = classify_blocks(gemini_8b, incumbent_dataset)
+    disagreements = [
         (incumbent_prediction, challenger_prediction)
         for incumbent_prediction, challenger_prediction in zip(incumbent_dataset, challenger_dataset)
         if incumbent_prediction.requires_direct_modification != challenger_prediction.requires_direct_modification
     ]
-    print(f"Number of ties: {len(ties)}")
+    print(f"Number of disagreements: {len(disagreements)}")
     print("Tiebreaking...")
-    judgements = tiebreak(deepseek_chat, ties)
+    judgements = tiebreak(deepseek_chat, disagreements)
     scores = []
     losses = []
     not_confident = []
-    for (incumbent_prediction, challenger_prediction), judgement in zip(ties, judgements):
+    for (incumbent_prediction, challenger_prediction), judgement in zip(disagreements, judgements):
         print(f"Incumbent: {incumbent_prediction.reasoning}\n")
         print(f"Challenger: {challenger_prediction.reasoning}\n")
         print(f"Judge for: {judgement.reasoning_for_modification} against: {judgement.reasoning_against_modification}")

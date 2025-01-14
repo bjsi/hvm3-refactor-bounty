@@ -6,44 +6,31 @@ import sys
 from typing import Callable, Literal, Optional
 import dspy
 import dspy.teleprompt
-from pydantic import BaseModel
 from src.my_datasets import load_binary_classification_judge_data, load_codebase_summary, load_real_tasks, load_symbol_explanations
 from src.file_context import FileContext, get_all_block_numbers, find_block_numbers, format_contexts, get_all_names, get_block_code, hide_block_numbers
 from src.filesystem import data_dir, get_optimized_program_path
 from src.utils import run_dspy_parallel
-from src.llms import gemini_8b, deepseek_chat, claude_sonnet, gpt_4o, gemini_flash
+from src.llms import gemini_8b, deepseek_chat, claude_sonnet, gpt_4o, gemini_flash, gemini_pro, phi_4
 
 class ClassifyBlock(dspy.Signature):
-    """Determine whether code in the given BLOCKs require direct modification. BLOCKs only require direct modification if the code directly visible inside them needs to be changed."""
-    codebase_summary: str = dspy.InputField()
+    """
+    Determine whether code in the given BLOCKs require direct modification.
+    BLOCKs only require direct modification if the code directly visible inside them needs to be changed.
+    Rules you must follow:
+    - Empty blocks never require direct modification.
+    """
     codebase_symbol_explanations: str = dspy.InputField()
     task: str = dspy.InputField()
     specific_context: str = dspy.InputField()
     block_number: int = dspy.InputField()
     task_reflection: str = dspy.OutputField(desc="Think step-by-step about the refactoring task")
-    reasoning: str = dspy.OutputField(desc="Debate whether or not the code in the BLOCK must be directly modified")
+    reasoning: str = dspy.OutputField(desc="Think step-by-step about whether or not the code in the BLOCK must be directly modified")
     requires_direct_modification: bool = dspy.OutputField()
     confidence: Literal["low", "medium", "high", "very high"] = dspy.OutputField(desc="Your confidence that this block must be directly modified")
 
 ##########
 # Training
 ##########
-
-def merge_contexts(*contexts: tuple[FileContext, FileContext]):
-    merged_hs_ctx, merged_c_ctx = None, None
-    for hs_ctx, c_ctx in contexts:
-        if merged_hs_ctx is None: merged_hs_ctx = hs_ctx
-        else: merged_hs_ctx = merged_hs_ctx.shallow_copy().merge(hs_ctx)
-        if merged_c_ctx is None: merged_c_ctx = c_ctx
-        else: merged_c_ctx = merged_c_ctx.shallow_copy().merge(c_ctx)
-    return merged_hs_ctx, merged_c_ctx
-
-def merge_contexts_for_names(names, code_contexts):
-    contexts = []
-    for name in names:
-        hs_ctx, c_ctx = code_contexts[name]
-        contexts.append((hs_ctx, c_ctx))
-    return merge_contexts(*contexts)
 
 def create_contexts_for_blocks(block_numbers: list[int]):
     hs_ctx = FileContext(data_dir / "hvm-code.hs")
@@ -62,15 +49,12 @@ def format_block_context(hs_ctx, c_ctx):
     lines = lines[:-2] + [end_block_line] + lines[-2:]
     return "\n".join(lines)
 
-# take the hardest cases from the judge data to use for training
 def load_judged_edge_cases():
-    codebase_summary = load_codebase_summary()
     real_tasks = load_real_tasks()
     sym_exps = load_symbol_explanations()
     sym_exps = {exp["name"]: exp["explanation"] for exp in sym_exps}
     judge_data = load_binary_classification_judge_data()
     input_keys = [
-        "codebase_summary",
         "codebase_symbol_explanations",
         "specific_context",
         "task",
@@ -92,19 +76,16 @@ def load_judged_edge_cases():
         examples.append(dspy.Example({
             **{k: data[k] for k in all_keys if k in data},
             "block_number": block_number,
-            "codebase_summary": codebase_summary,
             "codebase_symbol_explanations": "\n".join([f"{name}: {sym_exps[name]}" for name in task["related_symbols"]]),
             "reasoning": reasoning,
             "confidence": parse_confidence(data["confidence"]),
         }).with_inputs(*input_keys))
+    random.shuffle(examples)
     return examples
 
 def load_balanced_trainset():
-    # First get all judged edge cases
     edge_cases = load_judged_edge_cases()
-    
-    # Load examples from real, polished tasks
-    real_tasks_examples = load_trainset(lambda tasks: tasks[:3])
+    real_tasks_examples = load_trainset(lambda tasks: tasks[:6])
     
     # Split real tasks examples into positive and negative cases
     true_cases = [ex for ex in real_tasks_examples if ex.requires_direct_modification]
@@ -115,13 +96,12 @@ def load_balanced_trainset():
     # Calculate how many examples we need from each class to balance
     k = min(len(true_cases), len(false_cases))
     
-    # Use random sampling with replacement instead of multiplication
     true_cases = random.choices(true_cases, k=k)
-    false_cases = random.choices(false_cases, k=k)
-        
+    false_cases = random.choices(false_cases, k=k + 150)
+
     # Combine edge cases with balanced real task examples
-    balanced_examples = edge_cases + true_cases + false_cases
-    print(f"balanced_examples: {len(balanced_examples)}\npositive: {len(true_cases)}\nnegative: {len(false_cases)}\nedge: {len(edge_cases)}")
+    balanced_examples = true_cases + false_cases + edge_cases
+    print(f"balanced_examples: {len(balanced_examples)}\npositive: {len(true_cases)}\nnegative: {len(false_cases)}")
 
     random.seed(42)
     random.shuffle(balanced_examples)
@@ -133,7 +113,6 @@ def load_balanced_trainset():
 
 def load_trainset(filter_tasks: Callable[[list], bool] = lambda _: True):
     real_tasks = load_real_tasks()
-    codebase_summary = load_codebase_summary()
     sym_exps = load_symbol_explanations()
     sym_exps = {exp["name"]: exp["explanation"] for exp in sym_exps}
     all_block_numbers = sorted(get_all_block_numbers())
@@ -158,7 +137,6 @@ def load_trainset(filter_tasks: Callable[[list], bool] = lambda _: True):
                 block = block_numbers_batch[0]
                 block_info = next((b for b in task["blocks_to_edit"] if b["block_number"] == block), None)
                 task_examples.append(dspy.Example(
-                    codebase_summary=codebase_summary,
                     codebase_symbol_explanations="\n".join([f"{name}: {sym_exps[name]}" for name in task["related_symbols"]]),
                     specific_context=task_specific_context,
                     task=task["task"],
@@ -167,7 +145,7 @@ def load_trainset(filter_tasks: Callable[[list], bool] = lambda _: True):
                     reasoning=block_info.get("reasoning", None) if block_info else None,
                     requires_direct_modification=block_info.get("requires_direct_modification", False) if block_info else False,
                     confidence=parse_confidence(block_info.get("confidence", "low")) if block_info else "low",
-                ).with_inputs("codebase_summary", "codebase_symbol_explanations", "specific_context", "task", "block_number"))
+                ).with_inputs("codebase_symbol_explanations", "specific_context", "task", "block_number"))
         all_examples.extend(task_examples)
     return all_examples
 
@@ -202,21 +180,22 @@ def f1_score(predicted_blocks_to_edit, actual_blocks_to_edit):
 
 def optimize(devset, task_lm, prompt_lm, teacher_lm, dataset_summary_lm):
     program = dspy.Predict(ClassifyBlock)
-    with dspy.context(lm=task_lm):
+    with dspy.context(lm=task_lm, async_max_workers=10):
         optimizer = dspy.teleprompt.MIPROv2(
             metric=direct_score,
-            auto="light",
+            auto="medium",
             prompt_model=prompt_lm,
             task_model=task_lm,
             max_bootstrapped_demos=1,
-            max_labeled_demos=5,
-            num_threads=6,
+            max_labeled_demos=16,
+            num_threads=10,
             hide_demo_fields=[
                 "codebase_summary",
                 "codebase_symbol_explanations",
+                #"specific_context",
             ],
             dataset_summary_model=dataset_summary_lm, # TODO: deepseek hangs
-            # teacher_settings=dict(lm=teacher_lm), # causing hangs with deepseek
+            teacher_settings=dict(lm=teacher_lm), # causing hangs with deepseek
         )
         optimized_program = optimizer.compile(program, trainset=devset)
         optimized_program.save(get_optimized_program_path(__file__))
@@ -230,50 +209,36 @@ def classify_blocks(model, examples):
     if get_optimized_program_path(__file__).exists():
         print("Using optimized classify_blocks program")
         program.load(get_optimized_program_path(__file__))
-    with dspy.context(lm=model, async_max_workers=30):
+    with dspy.context(lm=model, async_max_workers=50):
         results = asyncio.run(run_dspy_parallel(program, examples))
     return results
 
-# 1 block, gemini, no optimizing, with filtering, accuracy 94%, f1 37%
-# -- USING END BLOCK --
-# 1 block, gemini, no optimizing, with filtering, accuracy 94%, f1 43%
-# -- CLEANED DATA --
-# 1 block, gemini, no optimizing, with filtering, accuracy 95%, f1 65%
-# 1 block, deepseek, no optimizing, with filtering, accuracy 96%, f1 75%
-# -- CLEANED DATA WITH TIEBREAKER --
-# 1 block, gemini, no optimizing, with filtering, accuracy 96%, f1 61%
-# 1 block, deepseek, no optimizing, with filtering, accuracy 98%, f1 80%
-# -- OPTIMIZATION v1 -- only edge cases identified w/ tiebreaker
-# 1 block, gemini, optimizing, with filtering, accuracy 96%, f1 60% - hmm pretty much the same - the instructions are overfitting
-# -- OPTIMIZATION v2 -- balanced mix of edge cases and real tasks, cleaned any incorrect data
-# 1 block, gemini, optimizing, with filtering, accuracy 97%, f1 67% - hmm pretty much the same - the instructions are overfitting
-
 if __name__ == "__main__":
-    # optimize(load_balanced_trainset(), gemini_8b, deepseek_chat, deepseek_chat, gpt_4o)
-    real_tasks = load_real_tasks()
-    task = list(real_tasks.values())[0]
-    dataset = load_trainset(lambda tasks: tasks[2:3])
-    results = classify_blocks(deepseek_chat, dataset)
-    print(results[0].task_reflection)
-    scores = []
-    wrong_reasons = []
-    for (result, datapoint) in list(zip(results, dataset)):
-        score = direct_score(datapoint, result)
-        scores.append(score)
-        if score == 0:
-            reason = "wrong" if result.requires_direct_modification != datapoint.requires_direct_modification else "low confidence"
-            if reason == "low confidence": continue
-            print(f"block {datapoint.block_number}")
-            print(f"code: {get_block_code(datapoint.block_number)}")
-            print(f"reasoning: {result.reasoning}")
-            print(f"prediction: {result.requires_direct_modification}")
-            print(f"confidence: {result.confidence}")
-            print(f"score: {score}")
-            wrong_reasons.append(reason)
-            print(f"reason for fail {reason}")
-            print('---')
+    optimize(load_balanced_trainset(), gemini_8b, deepseek_chat, deepseek_chat, gpt_4o)
+    # real_tasks = load_real_tasks()
+    # dataset = load_trainset(lambda tasks: tasks[0:1])[:1]
+    # # gemini_flash.cache = False
+    # results = classify_blocks(gemini_8b, dataset)
+    # scores = []
+    # wrong_reasons = []
+    # for (result, datapoint) in list(zip(results, dataset)):
+    #     score = direct_score(datapoint, result)
+    #     scores.append(score)
+    #     if score == 0:
+    #         reason = "wrong" if result.requires_direct_modification != datapoint.requires_direct_modification else "low confidence"
+    #         if reason == "low confidence": continue
+    #         print(f"block {datapoint.block_number}")
+    #         print(f"code: {get_block_code(datapoint.block_number)}")
+    #         print(f"reasoning: {result.reasoning}")
+    #         print(f"prediction: {result.requires_direct_modification}")
+    #         print(f"confidence: {result.confidence}")
+    #         print(f"score: {score}")
+    #         wrong_reasons.append(reason)
+    #         print(f"reason for fail {reason}")
+    #         print('---')
 
-    expected_blocks_to_edit = set([example.block_number for example in dataset if example.requires_direct_modification and convert_confidence_to_num(example.confidence) >= 0.75])
-    actual_blocks_to_edit = set([example.block_number for example, result in zip(dataset, results) if result.requires_direct_modification and convert_confidence_to_num(result.confidence) >= 0.75])
-    print(f"f1 score: {f1_score(expected_blocks_to_edit, actual_blocks_to_edit)}")
-    print(f"accuracy: {sum(scores) / len(scores)}")
+    # expected_blocks_to_edit = set([example.block_number for example in dataset if example.requires_direct_modification and convert_confidence_to_num(example.confidence) >= 0.75])
+    # actual_blocks_to_edit = set([example.block_number for example, result in zip(dataset, results) if result.requires_direct_modification and convert_confidence_to_num(result.confidence) >= 0.75])
+    # print(f"f1 score: {f1_score(expected_blocks_to_edit, actual_blocks_to_edit)}")
+    # print(f"accuracy: {sum(scores) / len(scores)}")
+    # print(gemini_8b.inspect_history())
