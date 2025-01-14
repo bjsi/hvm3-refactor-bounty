@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 from typing import Any, Callable, Literal
+from openai import RateLimitError
 import tiktoken
 import tqdm
 
@@ -13,6 +14,8 @@ async def run_parallel_tasks_with_progress(tasks: list[Callable], desc: str = "T
     async def wrapped_task(task: Callable, index: int, pbar: tqdm) -> tuple[int, Any]:
         try:
             result = await task()
+            if isinstance(result, RateLimitError):
+                print(f"Rate limit error: {result}")
             pbar.update(1)
             return index, result
         except Exception as e:
