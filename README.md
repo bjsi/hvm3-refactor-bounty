@@ -4,11 +4,11 @@ Develop an AI tool that, given the current snapshot of HVM3's codebase and a ref
 
 ## Setup
 
-- `git clone --recurse-submodules`
+- `git clone --recurse-submodules https://github.com/bjsi/hvm3-refactor-bounty`
+- `cd hvm3-refactor-bounty`
 - `python3 -m venv env`
 - `source env/bin/activate`
 - `pip install -r requirements.txt`
-- `npm install tree-sitter`
 - Create a `.env` file with your `GEMINI_API_KEY`.
 
 To run the pipeline on a task run:
