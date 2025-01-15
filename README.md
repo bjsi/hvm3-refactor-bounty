@@ -49,6 +49,7 @@ I wanted to see how good a small, cheap model could do at this task, so I used G
 ## Thoughts
 
 - Firstly, this was a lot of fun and I want to attempt more things like this! (lmk if you have some tasks for me!)
+- You could remove the concept of blocks and use symbols directly using my tree-sitter code.
 - I ran out of time to do a really rigorous evaluation of the full pipeline. I will probably evaluate it on my own codebase instead because I am not a good judge of the output for HVM3. I am curious what Victor thinks. You can swap models and re-optimize on different models. I tried a bunch but found that Gemini 8b was the best model for this task because of its low cost, low latency, high RPM rate limit and decent reasoning ability.
 - There is significant ambiguity in determining what is relevant to a refactoring request if you are being picky. It definitely requires strong reasoning.
 - `dspy` is excellent, though it is not a panacea and you still need to do a lot of work to get good results. `dspy` performs search over the space of possible prompts, but you still have to search over the space of possible `dspy` programs. I am sure someone with more experience could improve the results further. It is interesting to scroll through the optimized prompts in the `optimized_programs` directory.
