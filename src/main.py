@@ -10,7 +10,7 @@ from src.prompts.classify_symbols import classify_symbols
 # NOTE: i was hitting rate limits, but may have been daily-usage related
 # 8b should support 4000/min and this pipeline makes < 1000 requests
 # try turning this up to 300 or so
-ASYNC_MAX_WORKERS = 20
+ASYNC_MAX_WORKERS = 10
 
 def predict_blocks(task: str, model=gemini_8b):
     block_numbers = sorted(get_all_block_numbers())
