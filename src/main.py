@@ -39,6 +39,15 @@ def predict_blocks(task: str, model=gemini_8b):
     blocks = classify_blocks(model=model, examples=examples, async_max_workers=ASYNC_MAX_WORKERS, cache=False)
     print(json.dumps(blocks))
 
+    prompt_tokens_cost_per_million = 0.0375 # $/million
+    completion_tokens_cost_per_million = 0.15 # $/million
+    input_tokens = sum(msg["usage"]["prompt_tokens"] for msg in model.history)
+    output_tokens = sum(msg["usage"]["completion_tokens"] for msg in model.history)
+    print(f"total calls", len(model.history))
+    print(f"total prompt tokens: {input_tokens}")
+    print(f"total completion tokens: {output_tokens}")
+    print(f"Total cost: ${prompt_tokens_cost_per_million * (input_tokens / 1_000_000) + completion_tokens_cost_per_million * (output_tokens / 1_000_000):.5f}")
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Please provide a task as the first argument.")
